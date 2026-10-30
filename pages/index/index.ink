@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b6):
+// Display rules (zai-b7):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -49,10 +49,28 @@ const URL_TT = 'https://www.keihan.co.jp/zaisen-up/startTimeList.json';
 const RELOAD_MS = 90 * 1000;
 const RELOAD_WINDOW_MS = 10 * 60 * 1000;
 const RELOAD_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+// Abbreviations for the next-trains display on each station line,
+// e.g. "清水五条 *:急淀10:準出5" (express for Yodoyabashi in 10 min,
+// semi-express for Demachiyanagi in 5 min).
+const TYPE_AB = {
+  '普通': '普', '準急': '準', '急行': '急', '特急': '特',
+  '快速急行': '快急', '区間急行': '区急', '通勤準急': '通準',
+  '通勤快急': '通快', '快速特急': '快特', 'ライナー': 'ラ'
+};
+const DEST_AB = {
+  '淀屋橋': '淀', '出町柳': '出', '中之島': '中', '樟葉': '樟',
+  '枚方市': '枚', '三条': '三', '丹波橋': '丹', '中書島': '書',
+  '宇治': '宇', '私市': '私', '交野市': '交', '寝屋川市': '寝',
+  '萱島': '萱', '守口市': '守', '京橋': '京', '天満橋': '天',
+  '淀': '淀', '石清水八幡宮': '八', '伏見桃山': '桃', '墨染': '墨',
+  '藤森': '藤', '龍谷大前深草': '龍', '伏見稲荷': '稲',
+  '東福寺': '東', '七条': '七', '清水五条': '清', '祇園四条': '祇',
+  '神宮丸太町': '神'
+};
 
 export default {
   data: {
-    build: 'zai-b6',
+    build: 'zai-b7',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -66,13 +84,24 @@ export default {
   _headBase: '在線 読込中...',
   _reloadUntil: 0,
   _reloadTimer: null,
+  _clockTimer: null,
+  _delay: {},
+  _posByWdf: {},
   onLoad() {
     this.probeLocation();
     this.startAutoReload();
     this.fetchData();
+    // Recompute the "minutes left" displays every 10 seconds (no fetch).
+    if (typeof setInterval !== 'undefined') {
+      this._clockTimer = setInterval(() => { this.applyHead(); this.render(); }, 10000);
+    }
   },
   onUnload() {
     this.stopAutoReload();
+    if (this._clockTimer != null && typeof clearInterval !== 'undefined') {
+      clearInterval(this._clockTimer);
+    }
+    this._clockTimer = null;
   },
   // Auto-reload: refetch positions every 90 seconds for 10 minutes after
   // the page is shown (or after Enter is pressed). While active, the
@@ -214,6 +243,14 @@ export default {
           try {
             const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
             this._trains = d.locationObjects || [];
+            this._delay = {};
+            this._posByWdf = {};
+            for (const t of this.parsedTrains()) {
+              this._posByWdf[t.wdf] = t;
+              let dm = parseInt(t.info.delayMinutes, 10);
+              if (isNaN(dm)) dm = parseInt(String(t.delay).replace('+', ''), 10);
+              this._delay[t.wdf] = isNaN(dm) ? 0 : dm;
+            }
             const t = String(d.fileCreatedTime || '');
             const hh = t.slice(8, 10), mm = t.slice(10, 12);
             this._headBase = '京阪 在線 ' + hh + ':' + mm + '現在';
@@ -249,7 +286,7 @@ export default {
     try {
       if (typeof wx !== 'undefined' && wx.getStorage) {
         wx.getStorage({
-          key: 'zaisen_tt',
+          key: 'zaisen_tt2',
           success: (r) => {
             const saved = r && r.data;
             if (saved && saved.map && saved.at && (Date.now() - saved.at) < WEEK) {
@@ -277,9 +314,11 @@ export default {
             const map = {};
             for (const t of (d.TrainInfo || [])) {
               const m = {};
-              for (const s of (t.diaStationInfoObjects || [])) {
+              const dia = t.diaStationInfoObjects || [];
+              for (const s of dia) {
                 m[s.stationNameJp] = s.stationDepTime;
               }
+              if (dia.length) m['__dest'] = dia[dia.length - 1].stationNameJp;
               map[String(t.wdfBlockNo)] = m;
             }
             this._tt = map;
@@ -293,7 +332,8 @@ export default {
       });
     } catch (e) { /* keep geometry-only display */ }
   },
-  // Save a pruned copy: main-line stations only, '1' = stop / '0' = pass.
+  // Save a pruned copy: main-line stations only, keeping the raw
+  // departure-time strings (needed for the next-trains display).
   saveTimetable(fullMap) {
     try {
       if (typeof wx === 'undefined' || !wx.setStorage) return;
@@ -304,12 +344,74 @@ export default {
         const src = fullMap[wdf];
         const m = {};
         for (const nm in src) {
-          if (names[nm]) m[nm] = (src[nm] === '99:99') ? '0' : '1';
+          if (names[nm] || nm === '__dest') m[nm] = src[nm];
         }
         pruned[wdf] = m;
       }
-      wx.setStorage({ key: 'zaisen_tt', data: { at: Date.now(), map: pruned } });
+      wx.setStorage({ key: 'zaisen_tt2', data: { at: Date.now(), map: pruned } });
     } catch (e) { /* cache is best-effort */ }
+  },
+  // Next two departures at a station, e.g. "急淀10:準出5". Computed from
+  // the timetable (scheduled departure + the train's current delay).
+  // Type abbreviations come from the live position feed, so a train that
+  // has not started running yet shows its destination and minutes only.
+  // Origin stations have no departure time in the data ("-"), so termini
+  // starting there show nothing.
+  nextTrainsText(segIdx) {
+    if (!this._tt) return '';
+    const sName = STATIONS[segIdx][0];
+    const now = Date.now();
+    const cands = [];
+    for (const wdf in this._tt) {
+      const entry = this._tt[wdf];
+      const dep = entry[sName];
+      if (!dep || dep === '99:99' || dep === '-') continue;
+      // A train whose destination IS this station only arrives here;
+      // its listed time is not a departure.
+      const destName = entry['__dest'] || this.lastDestOf(entry);
+      if (destName === sName) continue;
+      const parts = dep.split(':');
+      if (parts.length !== 2) continue;
+      const dt = new Date();
+      dt.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
+      let t = dt.getTime() + (this._delay[wdf] || 0) * 60000;
+      if (t < now - 30000) continue;
+      const pos = this._posByWdf[wdf];
+      if (pos) {
+        if (pos.dir === '1' && (pos.seg > segIdx || (pos.seg === segIdx && pos.off > 0))) continue;
+        if (pos.dir === '0' && pos.seg < segIdx) continue;
+      }
+      cands.push({ t: t, wdf: wdf, entry: entry });
+    }
+    cands.sort((a, b) => a.t - b.t);
+    const items = [];
+    for (let k = 0; k < Math.min(2, cands.length); k++) {
+      const c = cands[k];
+      let dest = '';
+      const pos = this._posByWdf[c.wdf];
+      if (pos && pos.info.destStationNameJp) dest = pos.info.destStationNameJp;
+      let typeAb = '';
+      if (pos && pos.info.trainTypeJp) {
+        typeAb = TYPE_AB[pos.info.trainTypeJp] || String(pos.info.trainTypeJp).slice(0, 1);
+      }
+      if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
+      const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
+      let mins = Math.floor((c.t - now) / 60000);
+      if (mins < 0) mins = 0;
+      items.push(typeAb + destAb + mins);
+    }
+    return items.join(':');
+  },
+  lastDestOf(entry) {
+    // dia entries are in travel order per train; the destination is the
+    // entry whose station is farthest along the itinerary. The timetable
+    // object preserves insertion order, so take the last station name.
+    let last = '';
+    for (const nm in entry) {
+      if (nm.indexOf('__') === 0) continue;
+      last = nm;
+    }
+    return last;
   },
   render() {
     const all = this.parsedTrains();
@@ -325,6 +427,8 @@ export default {
       if (i === this.data.center) centerLine = lines.length;
       let s = (i === this.data.center ? '>' : ' ') + name;
       if (HOME[name]) s += ' *';
+      const nt = this.nextTrainsText(i);
+      if (nt) s += ':' + nt;
       lines.push(s);
       const tr = bySeg[i] || [];
       const max = Math.min(tr.length, 3);
