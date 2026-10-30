@@ -17,7 +17,9 @@
 //   - A stopped train waiting for a following train to pass it at that
 //     station is wrapped in [[ ]] (judged from the official timetable:
 //     startTimeList.json joined by wdfBlockNo; a station entry with a real
-//     departure time = stop, "99:99" or absent = pass).
+//     departure time = stop, "99:99" or absent = pass). Only stations with
+//     passing facilities can host an overtake (OVERTAKE below); e.g.
+//     Kiyomizu-Gojo has no refuge platform, so no [[ ]] there.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -32,12 +34,19 @@ const STATIONS = [
   ['北浜', 2], ['淀屋橋', 1]
 ];
 const HOME = { '清水五条': 1, '龍谷大前深草': 1 };
+// Stations where a stopped train can be overtaken (refuge/passing
+// facilities). 'up' = up direction only (Iwashimizu-Hachimangu).
+const OVERTAKE = {
+  '三条': 'both', '龍谷大前深草': 'both', '丹波橋': 'both', '淀': 'both',
+  '樟葉': 'both', '枚方市': 'both', '香里園': 'both', '萱島': 'both',
+  '守口市': 'both', '京橋': 'both', '石清水八幡宮': 'up'
+};
 const URL_POS = 'https://www.keihan.co.jp/zaisen-up/trainPositionList.json';
 const URL_TT = 'https://www.keihan.co.jp/zaisen-up/startTimeList.json';
 
 export default {
   data: {
-    build: 'zai-b2',
+    build: 'zai-b3',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -109,6 +118,9 @@ export default {
   isOvertakeWait(a, all) {
     if (!this._tt) return false;
     const sName = STATIONS[a.seg][0];
+    const cap = OVERTAKE[sName];
+    if (!cap) return false;
+    if (cap === 'up' && a.dir !== '0') return false;
     if (this.stopsAt(a.wdf, sName) !== true) return false;
     // rows of the section immediately behind S (between the previous
     // station and S): down trains come from smaller rows, up from larger.
