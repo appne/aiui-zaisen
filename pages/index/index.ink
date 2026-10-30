@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b8):
+// Display rules (zai-b9):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -70,7 +70,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b8',
+    build: 'zai-b9',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -87,15 +87,20 @@ export default {
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
-  _posCreatedMs: 0,
-  _posFetchNow: 0,
+  _nowMin: -1,
+  _elapsedSec: 0,
   onLoad() {
     this.probeLocation();
     this.startAutoReload();
     this.fetchData();
     // Recompute the "minutes left" displays every 10 seconds (no fetch).
+    // The tick count also advances the anchored display clock.
     if (typeof setInterval !== 'undefined') {
-      this._clockTimer = setInterval(() => { this.applyHead(); this.render(); }, 10000);
+      this._clockTimer = setInterval(() => {
+        this._elapsedSec += 10;
+        this.applyHead();
+        this.render();
+      }, 10000);
     }
   },
   onUnload() {
@@ -245,18 +250,19 @@ export default {
           try {
             const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
             this._trains = d.locationObjects || [];
-            // Anchor "now" to the position file's server-side creation
-            // time. Some runtimes (seen in the Craft preview) return a
-            // Date.now() that disagrees with new Date(), which produced
-            // absurd minute counts; deltas of Date.now() are reliable
-            // even then, so track elapsed time from the fetch instead.
+            // Anchor the display clock to the position file's server-side
+            // creation time (JST wall time). Some preview runtimes have a
+            // broken Date implementation that produced absurd minute
+            // counts, so the minute math below uses NO Date at all: just
+            // this wall-clock anchor plus the 10-second tick count.
             if (d.fileCreatedTime) {
               const fc = String(d.fileCreatedTime);
-              const ms = Date.UTC(+fc.slice(0, 4), +fc.slice(4, 6) - 1, +fc.slice(6, 8),
-                +fc.slice(8, 10), +fc.slice(10, 12), +fc.slice(12, 14)) - 9 * 3600 * 1000;
-              if (!isNaN(ms)) {
-                this._posCreatedMs = ms;
-                this._posFetchNow = Date.now();
+              const hh = parseInt(fc.slice(8, 10), 10);
+              const mi = parseInt(fc.slice(10, 12), 10);
+              const ss = parseInt(fc.slice(12, 14), 10);
+              if (!isNaN(hh) && !isNaN(mi)) {
+                this._nowMin = hh * 60 + mi + (isNaN(ss) ? 0 : ss) / 60;
+                this._elapsedSec = 0;
               }
             }
             this._delay = {};
@@ -373,18 +379,18 @@ export default {
   // has not started running yet shows its destination and minutes only.
   // Origin stations have no departure time in the data ("-"), so termini
   // starting there show nothing.
-  // Current time for display math: the anchored server time when the
-  // position file has been fetched, else the local clock.
-  effectiveNow() {
-    if (this._posCreatedMs) {
-      return this._posCreatedMs + (Date.now() - this._posFetchNow);
-    }
-    return new Date().getTime();
+  // Current time-of-day in minutes (float) for the next-trains math:
+  // the server-anchored wall clock when available, else the local clock.
+  // Deliberately avoids epoch/Date arithmetic (see _nowMin note).
+  nowMinutes() {
+    if (this._nowMin >= 0) return this._nowMin + this._elapsedSec / 60;
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
   },
   nextTrainsText(segIdx) {
     if (!this._tt) return '';
     const sName = STATIONS[segIdx][0];
-    const now = this.effectiveNow();
+    const nowMin = this.nowMinutes();
     const cands = [];
     for (const wdf in this._tt) {
       const entry = this._tt[wdf];
@@ -396,18 +402,19 @@ export default {
       if (destName === sName) continue;
       const parts = dep.split(':');
       if (parts.length !== 2) continue;
-      const dt = new Date(now);
-      dt.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
-      let t = dt.getTime() + (this._delay[wdf] || 0) * 60000;
-      if (t < now - 30000) continue;
+      let diff = (parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10))
+        + (this._delay[wdf] || 0) - nowMin;
+      if (diff < -30) diff += 1440;
+      else if (diff > 720) diff -= 1440;
+      if (diff < -0.5) continue;
       const pos = this._posByWdf[wdf];
       if (pos) {
         if (pos.dir === '1' && (pos.seg > segIdx || (pos.seg === segIdx && pos.off > 0))) continue;
         if (pos.dir === '0' && pos.seg < segIdx) continue;
       }
-      cands.push({ t: t, wdf: wdf, entry: entry });
+      cands.push({ diff: diff, wdf: wdf, entry: entry });
     }
-    cands.sort((a, b) => a.t - b.t);
+    cands.sort((a, b) => a.diff - b.diff);
     const items = [];
     for (let k = 0; k < Math.min(2, cands.length); k++) {
       const c = cands[k];
@@ -420,7 +427,7 @@ export default {
       }
       if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
       const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
-      let mins = Math.floor((c.t - now) / 60000);
+      let mins = Math.floor(c.diff);
       if (mins < 0) mins = 0;
       items.push(typeAb + destAb + mins);
     }
