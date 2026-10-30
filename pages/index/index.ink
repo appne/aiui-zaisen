@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b10):
+// Display rules (zai-b11):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -70,7 +70,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b10',
+    build: 'zai-b11',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -463,12 +463,12 @@ export default {
       if (nt) s += ':' + nt;
       lines.push(s);
       const tr = bySeg[i] || [];
-      if (tr.length) {
-        // Combine the block's trains onto one line, up to 3 trains.
-        const shown = tr.slice(0, 3);
-        const multi = shown.length > 1;
-        let line = shown.map(t => this.trainLabel(t, all, multi)).join(' ');
-        if (tr.length > 3) line += ' …';
+      // Combine the block's trains onto lines of up to 3 trains each;
+      // any remaining trains continue on the next line.
+      for (let s2 = 0; s2 < tr.length; s2 += 3) {
+        const chunk = tr.slice(s2, s2 + 3);
+        const multi = chunk.length > 1;
+        const line = chunk.map(t => this.trainLabel(t, all, multi)).join(' ');
         lines.push(multi ? line : '  ' + line);
       }
     }
