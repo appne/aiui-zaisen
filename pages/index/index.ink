@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b9):
+// Display rules (zai-b10):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -54,8 +54,8 @@ const RELOAD_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '�
 // semi-express for Demachiyanagi in 5 min).
 const TYPE_AB = {
   '普通': '普', '準急': '準', '急行': '急', '特急': '特',
-  '快速急行': '快急', '区間急行': '区急', '通勤準急': '通準',
-  '通勤快急': '通快', '快速特急': '快特', 'ライナー': 'ラ'
+  '快速急行': '快', '区間急行': '区', '通勤準急': '通',
+  '通勤快急': '通', '快速特急': '快', 'ライナー': 'ラ'
 };
 const DEST_AB = {
   '淀屋橋': '淀', '出町柳': '出', '中之島': '中', '樟葉': '樟',
@@ -70,7 +70,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b9',
+    build: 'zai-b10',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -223,10 +223,11 @@ export default {
     }
     return false;
   },
-  trainLabel(t, all) {
+  trainLabel(t, all, compact) {
     const info = t.info;
     const arrow = t.dir === '0' ? '↑' : '↓';
-    let s = arrow + (info.trainTypeJp || '') + ' ' + (info.destStationNameJp || '') + '行';
+    // When several trains share a line, drop the trailing 行 to save width.
+    let s = arrow + (info.trainTypeJp || '') + ' ' + (info.destStationNameJp || '') + (compact ? '' : '行');
     if (t.delay && t.delay !== '±0' && t.delay !== '+0') s += ' ' + t.delay;
     if (t.off === 0) {
       const sName = STATIONS[t.seg][0];
@@ -416,7 +417,7 @@ export default {
     }
     cands.sort((a, b) => a.diff - b.diff);
     const items = [];
-    for (let k = 0; k < Math.min(2, cands.length); k++) {
+    for (let k = 0; k < Math.min(4, cands.length); k++) {
       const c = cands[k];
       let dest = '';
       const pos = this._posByWdf[c.wdf];
@@ -462,9 +463,14 @@ export default {
       if (nt) s += ':' + nt;
       lines.push(s);
       const tr = bySeg[i] || [];
-      const max = Math.min(tr.length, 3);
-      for (let k = 0; k < max; k++) lines.push('  ' + this.trainLabel(tr[k], all));
-      if (tr.length > 3) lines.push('  …');
+      if (tr.length) {
+        // Combine the block's trains onto one line, up to 3 trains.
+        const shown = tr.slice(0, 3);
+        const multi = shown.length > 1;
+        let line = shown.map(t => this.trainLabel(t, all, multi)).join(' ');
+        if (tr.length > 3) line += ' …';
+        lines.push(multi ? line : '  ' + line);
+      }
     }
     let start = centerLine - 5;
     if (start < 0) start = 0;
