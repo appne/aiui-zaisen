@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b7):
+// Display rules (zai-b8):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -70,7 +70,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b7',
+    build: 'zai-b8',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -87,6 +87,8 @@ export default {
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
+  _posCreatedMs: 0,
+  _posFetchNow: 0,
   onLoad() {
     this.probeLocation();
     this.startAutoReload();
@@ -243,6 +245,20 @@ export default {
           try {
             const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
             this._trains = d.locationObjects || [];
+            // Anchor "now" to the position file's server-side creation
+            // time. Some runtimes (seen in the Craft preview) return a
+            // Date.now() that disagrees with new Date(), which produced
+            // absurd minute counts; deltas of Date.now() are reliable
+            // even then, so track elapsed time from the fetch instead.
+            if (d.fileCreatedTime) {
+              const fc = String(d.fileCreatedTime);
+              const ms = Date.UTC(+fc.slice(0, 4), +fc.slice(4, 6) - 1, +fc.slice(6, 8),
+                +fc.slice(8, 10), +fc.slice(10, 12), +fc.slice(12, 14)) - 9 * 3600 * 1000;
+              if (!isNaN(ms)) {
+                this._posCreatedMs = ms;
+                this._posFetchNow = Date.now();
+              }
+            }
             this._delay = {};
             this._posByWdf = {};
             for (const t of this.parsedTrains()) {
@@ -357,10 +373,18 @@ export default {
   // has not started running yet shows its destination and minutes only.
   // Origin stations have no departure time in the data ("-"), so termini
   // starting there show nothing.
+  // Current time for display math: the anchored server time when the
+  // position file has been fetched, else the local clock.
+  effectiveNow() {
+    if (this._posCreatedMs) {
+      return this._posCreatedMs + (Date.now() - this._posFetchNow);
+    }
+    return new Date().getTime();
+  },
   nextTrainsText(segIdx) {
     if (!this._tt) return '';
     const sName = STATIONS[segIdx][0];
-    const now = Date.now();
+    const now = this.effectiveNow();
     const cands = [];
     for (const wdf in this._tt) {
       const entry = this._tt[wdf];
@@ -372,7 +396,7 @@ export default {
       if (destName === sName) continue;
       const parts = dep.split(':');
       if (parts.length !== 2) continue;
-      const dt = new Date();
+      const dt = new Date(now);
       dt.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
       let t = dt.getTime() + (this._delay[wdf] || 0) * 60000;
       if (t < now - 30000) continue;
