@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b2):
+// Display rules (zai-b4):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -46,7 +46,7 @@ const URL_TT = 'https://www.keihan.co.jp/zaisen-up/startTimeList.json';
 
 export default {
   data: {
-    build: 'zai-b3',
+    build: 'zai-b4',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -103,14 +103,16 @@ export default {
     out.sort((a, b) => a.row - b.row);
     return out;
   },
-  // true = stops at the station, false = passes, null = timetable unknown
+  // true = stops at the station, false = passes, null = timetable unknown.
+  // Values are either raw departure times ('99:99' = pass) from a fresh
+  // fetch, or the pruned cache form ('1' = stop, '0' = pass).
   stopsAt(wdf, stationName) {
     if (!this._tt) return null;
     const entry = this._tt[wdf];
     if (!entry) return null;
     const v = entry[stationName];
     if (v === undefined) return false;
-    if (v === '99:99') return false;
+    if (v === '99:99' || v === '0') return false;
     return true;
   },
   // Is stopped train A (at station S, row = firstRow of S) being held for a
@@ -179,11 +181,35 @@ export default {
       this.render();
     }
   },
-  // One-time background fetch of the timetable (for stop/pass judgement).
-  // If it fails, display falls back to geometry-only brackets.
+  // Timetable (for stop/pass judgement) is cached on the device: stopping
+  // patterns barely change, so it is re-fetched only when the cached copy
+  // is a week old or more. If storage or the fetch fails, display falls
+  // back to geometry-only brackets.
   fetchTimetable() {
     if (this._ttTried) return;
     this._ttTried = true;
+    const WEEK = 7 * 24 * 3600 * 1000;
+    try {
+      if (typeof wx !== 'undefined' && wx.getStorage) {
+        wx.getStorage({
+          key: 'zaisen_tt',
+          success: (r) => {
+            const saved = r && r.data;
+            if (saved && saved.map && saved.at && (Date.now() - saved.at) < WEEK) {
+              this._tt = saved.map;
+              this.render();
+            } else {
+              this.fetchTimetableRemote();
+            }
+          },
+          fail: () => { this.fetchTimetableRemote(); }
+        });
+        return;
+      }
+    } catch (e) { /* fall through to remote fetch */ }
+    this.fetchTimetableRemote();
+  },
+  fetchTimetableRemote() {
     try {
       wx.request({
         url: URL_TT,
@@ -200,6 +226,7 @@ export default {
               map[String(t.wdfBlockNo)] = m;
             }
             this._tt = map;
+            this.saveTimetable(map);
           } catch (e) {
             this._tt = null;
           }
@@ -208,6 +235,24 @@ export default {
         fail: () => { /* keep geometry-only display */ }
       });
     } catch (e) { /* keep geometry-only display */ }
+  },
+  // Save a pruned copy: main-line stations only, '1' = stop / '0' = pass.
+  saveTimetable(fullMap) {
+    try {
+      if (typeof wx === 'undefined' || !wx.setStorage) return;
+      const names = {};
+      for (const pair of STATIONS) names[pair[0]] = 1;
+      const pruned = {};
+      for (const wdf in fullMap) {
+        const src = fullMap[wdf];
+        const m = {};
+        for (const nm in src) {
+          if (names[nm]) m[nm] = (src[nm] === '99:99') ? '0' : '1';
+        }
+        pruned[wdf] = m;
+      }
+      wx.setStorage({ key: 'zaisen_tt', data: { at: Date.now(), map: pruned } });
+    } catch (e) { /* cache is best-effort */ }
   },
   render() {
     const all = this.parsedTrains();
