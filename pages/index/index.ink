@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b4):
+// Display rules (zai-b5):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -46,7 +46,7 @@ const URL_TT = 'https://www.keihan.co.jp/zaisen-up/startTimeList.json';
 
 export default {
   data: {
-    build: 'zai-b4',
+    build: 'zai-b5',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -57,8 +57,46 @@ export default {
   _tt: null,
   _ttTried: false,
   _lastFetch: 0,
+  _headBase: '在線 読込中...',
+  _reloadUntil: 0,
+  _reloadTimer: null,
   onLoad() {
     this.probeLocation();
+    this.startAutoReload();
+    this.fetchData();
+  },
+  onUnload() {
+    this.stopAutoReload();
+  },
+  // Auto-reload: refetch positions every minute for 10 minutes after the
+  // page is shown (or after Enter is pressed). While active, the header
+  // carries a "●" mark. The official JSON itself updates about once a
+  // minute, so a 1-minute interval adds no extra pressure beyond that.
+  autoActive() {
+    return this._reloadUntil && Date.now() < this._reloadUntil;
+  },
+  applyHead() {
+    this.setData({ head: (this.autoActive() ? '●' : '') + this._headBase });
+  },
+  startAutoReload() {
+    this._reloadUntil = Date.now() + 10 * 60 * 1000;
+    if (this._reloadTimer == null && typeof setInterval !== 'undefined') {
+      this._reloadTimer = setInterval(() => this.onReloadTick(), 60000);
+    }
+    this.applyHead();
+  },
+  stopAutoReload() {
+    if (this._reloadTimer != null && typeof clearInterval !== 'undefined') {
+      clearInterval(this._reloadTimer);
+    }
+    this._reloadTimer = null;
+  },
+  onReloadTick() {
+    if (!this.autoActive()) {
+      this.stopAutoReload();
+      this.applyHead();
+      return;
+    }
     this.fetchData();
   },
   probeLocation() {
@@ -153,7 +191,8 @@ export default {
     const now = Date.now();
     if (now - this._lastFetch < 2000) return;
     this._lastFetch = now;
-    this.setData({ head: '在線 読込中...' });
+    this._headBase = '在線 読込中...';
+    this.applyHead();
     try {
       wx.request({
         url: URL_POS,
@@ -164,20 +203,25 @@ export default {
             this._trains = d.locationObjects || [];
             const t = String(d.fileCreatedTime || '');
             const hh = t.slice(8, 10), mm = t.slice(10, 12);
-            this.setData({ head: '京阪 在線 ' + hh + ':' + mm + '現在' });
+            this._headBase = '京阪 在線 ' + hh + ':' + mm + '現在';
           } catch (e) {
-            this.setData({ head: '在線 解析エラー' });
+            // Keihan shows a maintenance page (HTML) during maintenance,
+            // which lands here as a JSON parse failure.
+            this._headBase = '在線 メンテナンス中かも';
           }
+          this.applyHead();
           this.render();
           this.fetchTimetable();
         },
         fail: () => {
-          this.setData({ head: '在線 取得失敗' });
+          this._headBase = '在線 取得失敗';
+          this.applyHead();
           this.render();
         }
       });
     } catch (e) {
-      this.setData({ head: '在線 取得不可' });
+      this._headBase = '在線 取得不可';
+      this.applyHead();
       this.render();
     }
   },
@@ -291,7 +335,7 @@ export default {
   onKeyUp(event) {
     if (event.code === 'ArrowUp') { event.preventDefault(); this.move(-1); }
     else if (event.code === 'ArrowDown') { event.preventDefault(); this.move(1); }
-    else if (event.code === 'Enter') { event.preventDefault(); this.fetchData(); }
+    else if (event.code === 'Enter') { event.preventDefault(); this.startAutoReload(); this.fetchData(); }
   }
 }
 </script>
