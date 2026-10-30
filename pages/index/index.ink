@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b5):
+// Display rules (zai-b6):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -43,10 +43,16 @@ const OVERTAKE = {
 };
 const URL_POS = 'https://www.keihan.co.jp/zaisen-up/trainPositionList.json';
 const URL_TT = 'https://www.keihan.co.jp/zaisen-up/startTimeList.json';
+// Auto-reload runs every 90 seconds for 10 minutes. The official JSON is
+// regenerated roughly once a minute (measured gaps of 60-71 s, not
+// published), so 90 s stays clear of hammering it while missing little.
+const RELOAD_MS = 90 * 1000;
+const RELOAD_WINDOW_MS = 10 * 60 * 1000;
+const RELOAD_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 
 export default {
   data: {
-    build: 'zai-b5',
+    build: 'zai-b6',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -68,20 +74,27 @@ export default {
   onUnload() {
     this.stopAutoReload();
   },
-  // Auto-reload: refetch positions every minute for 10 minutes after the
-  // page is shown (or after Enter is pressed). While active, the header
-  // carries a "●" mark. The official JSON itself updates about once a
-  // minute, so a 1-minute interval adds no extra pressure beyond that.
+  // Auto-reload: refetch positions every 90 seconds for 10 minutes after
+  // the page is shown (or after Enter is pressed). While active, the
+  // header carries a circled-number countdown of the remaining reload
+  // slots (e.g. ⑦ at the start with a 90-second interval).
   autoActive() {
     return this._reloadUntil && Date.now() < this._reloadUntil;
   },
   applyHead() {
-    this.setData({ head: (this.autoActive() ? '●' : '') + this._headBase });
+    let mark = '';
+    if (this.autoActive()) {
+      let n = Math.ceil((this._reloadUntil - Date.now()) / RELOAD_MS);
+      if (n < 1) n = 1;
+      if (n > 10) n = 10;
+      mark = RELOAD_MARKS[n - 1];
+    }
+    this.setData({ head: mark + this._headBase });
   },
   startAutoReload() {
-    this._reloadUntil = Date.now() + 10 * 60 * 1000;
+    this._reloadUntil = Date.now() + RELOAD_WINDOW_MS;
     if (this._reloadTimer == null && typeof setInterval !== 'undefined') {
-      this._reloadTimer = setInterval(() => this.onReloadTick(), 60000);
+      this._reloadTimer = setInterval(() => this.onReloadTick(), RELOAD_MS);
     }
     this.applyHead();
   },
