@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b13):
+// Display rules (zai-b14):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -34,6 +34,23 @@ const STATIONS = [
   ['北浜', 2], ['淀屋橋', 1]
 ];
 const HOME = { '清水五条': 1, '龍谷大前深草': 1 };
+// Station coordinates (WGS84), aligned with STATIONS. Source: OpenStreetMap.
+const COORDS = [
+  [35.03027, 135.77268], [35.01867, 135.77224], [35.00902, 135.77233],
+  [35.00323, 135.77193], [34.99561, 135.76845], [34.98907, 135.76791],
+  [34.98126, 135.77002], [34.97349, 135.77004], [34.96889, 135.76926],
+  [34.96436, 135.77010], [34.95681, 135.77021], [34.94803, 135.76902],
+  [34.93891, 135.76540], [34.93281, 135.76437], [34.92672, 135.76017],
+  [34.90651, 135.72118], [34.88463, 135.70007], [34.88175, 135.68404],
+  [34.86195, 135.67536], [34.84385, 135.66559], [34.82917, 135.65395],
+  [34.81614, 135.64872], [34.81140, 135.63939], [34.79787, 135.63020],
+  [34.78476, 135.63099], [34.76407, 135.62084], [34.74735, 135.61083],
+  [34.74301, 135.60286], [34.74007, 135.59166], [34.73806, 135.58291],
+  [34.73734, 135.57566], [34.73530, 135.56520], [34.73071, 135.55992],
+  [34.72761, 135.55727], [34.72431, 135.55501], [34.71938, 135.55163],
+  [34.71250, 135.54693], [34.70712, 135.54326], [34.69699, 135.53217],
+  [34.69033, 135.51642], [34.69150, 135.50758], [34.69250, 135.50129]
+];
 // Stations where a stopped train can be overtaken (refuge/passing
 // facilities). 'up' = up direction only (Iwashimizu-Hachimangu).
 const OVERTAKE = {
@@ -70,7 +87,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b13',
+    build: 'zai-b14',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -154,7 +171,14 @@ export default {
         wx.getLocation({
           type: 'wgs84',
           success: (r) => {
-            this.setData({ foot: 'loc OK ' + r.latitude.toFixed(3) + ',' + r.longitude.toFixed(3) });
+            const idx = this.nearestStation(r.latitude, r.longitude);
+            this.setData({ foot: 'loc OK ' + STATIONS[idx][0] + ' ' + r.latitude.toFixed(3) + ',' + r.longitude.toFixed(3) });
+            // Centre on the nearest station, unless the user has
+            // already scrolled away from the initial view.
+            if (!this._userMoved && idx !== this.data.center) {
+              this.setData({ center: idx });
+              this.render();
+            }
           },
           fail: () => { this.setData({ foot: 'loc NG' }); }
         });
@@ -164,6 +188,17 @@ export default {
     } catch (e) {
       this.setData({ foot: 'loc err' });
     }
+  },
+  nearestStation(lat, lon) {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < COORDS.length; i++) {
+      const dLa = lat - COORDS[i][0];
+      const dLo = (lon - COORDS[i][1]) * 0.82;
+      const d = dLa * dLa + dLo * dLo;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
   },
   parseTrain(o) {
     const row = parseInt(o.locationRow, 10);
@@ -476,12 +511,13 @@ export default {
     }
     let start = centerLine - 5;
     if (start < 0) start = 0;
-    if (start > lines.length - 15) start = Math.max(0, lines.length - 15);
+    if (start > lines.length - 14) start = Math.max(0, lines.length - 14);
     const patch = {};
-    for (let k = 0; k < 15; k++) patch['L' + k] = lines[start + k] || '';
+    for (let k = 0; k < 14; k++) patch['L' + k] = lines[start + k] || '';
     this.setData(patch);
   },
   move(d) {
+    this._userMoved = true;
     let c = this.data.center + d;
     if (c < 0) c = 0;
     if (c > STATIONS.length - 1) c = STATIONS.length - 1;
@@ -513,7 +549,6 @@ export default {
     <text class="line">{{ L11 }}</text>
     <text class="line">{{ L12 }}</text>
     <text class="line">{{ L13 }}</text>
-    <text class="line">{{ L14 }}</text>
     <text class="foot">{{ foot }} {{ build }}</text>
   </view>
 </page>
@@ -525,26 +560,26 @@ export default {
   align-items: flex-start;
   justify-content: flex-start;
   height: 100vh;
-  padding: 10px;
+  padding: 6px;
 }
 
 .head {
   color: #40FF5E;
-  font-size: 26px;
-  line-height: 30px;
-  margin-bottom: 6px;
+  font-size: 24px;
+  line-height: 27px;
+  margin-bottom: 3px;
 }
 
 .line {
   color: #40FF5E;
-  font-size: 20px;
-  line-height: 24px;
+  font-size: 19px;
+  line-height: 20px;
 }
 
 .foot {
   color: #40FF5E99;
-  font-size: 16px;
-  line-height: 20px;
-  margin-top: 6px;
+  font-size: 15px;
+  line-height: 17px;
+  margin-top: 3px;
 }
 </style>
