@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b14):
+// Display rules (zai-b15):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -87,7 +87,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b14',
+    build: 'zai-b15',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -104,6 +104,7 @@ export default {
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
+  _focused: false,
   _nowMin: -1,
   _elapsedSec: 0,
   onLoad() {
@@ -480,10 +481,28 @@ export default {
     }
     return last;
   },
+  // Focused mode: has this train already passed the focused station?
+  // Down trains travel toward larger display indexes, up trains toward
+  // smaller ones. A train inside the focused station's block counts as
+  // "not passed" while it is at the station (down) or still approaching
+  // it from below (up).
+  notPassedFocus(t) {
+    const f = this.data.center;
+    if (t.dir === '1') return t.seg < f || (t.seg === f && t.off === 0);
+    return t.seg > f || t.seg === f;
+  },
   render() {
     const all = this.parsedTrains();
+    const focusName = STATIONS[this.data.center][0];
     const bySeg = {};
     for (const t of all) {
+      if (this._focused) {
+        // Hide trains that do not stop at the focused station (the
+        // timetable also excludes trains that never reach it), and
+        // trains that have already passed it.
+        if (this.stopsAt(t.wdf, focusName) === false) continue;
+        if (!this.notPassedFocus(t)) continue;
+      }
       if (!bySeg[t.seg]) bySeg[t.seg] = [];
       bySeg[t.seg].push(t);
     }
@@ -491,13 +510,16 @@ export default {
     let centerLine = 0;
     for (let i = 0; i < STATIONS.length; i++) {
       const name = STATIONS[i][0];
+      const tr = bySeg[i] || [];
+      // In focused mode, stations with no relevant train are hidden too
+      // (the focused station itself always stays).
+      if (this._focused && i !== this.data.center && tr.length === 0) continue;
       if (i === this.data.center) centerLine = lines.length;
       let s = (i === this.data.center ? '>' : ' ') + name;
       if (HOME[name]) s += ' *';
       const nt = this.nextTrainsText(i);
       if (nt) s += ':' + nt;
       lines.push(s);
-      const tr = bySeg[i] || [];
       // Combine the block's trains onto lines of up to 3 trains each;
       // any remaining trains continue on the next line.
       for (let s2 = 0; s2 < tr.length; s2 += 3) {
@@ -527,7 +549,17 @@ export default {
   onKeyUp(event) {
     if (event.code === 'ArrowUp') { event.preventDefault(); this.move(-1); }
     else if (event.code === 'ArrowDown') { event.preventDefault(); this.move(1); }
-    else if (event.code === 'Enter') { event.preventDefault(); this.startAutoReload(); this.fetchData(); }
+    else if (event.code === 'Enter') {
+      event.preventDefault();
+      // Click behaviour: while auto-reload is active, a click reloads,
+      // resets the auto-reload window AND toggles the focused display
+      // mode. While auto-reload is inactive, a click reloads and starts
+      // auto-reload, leaving the mode unchanged.
+      if (this.autoActive()) this._focused = !this._focused;
+      this.startAutoReload();
+      this.fetchData();
+      this.render();
+    }
   }
 }
 </script>
