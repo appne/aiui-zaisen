@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b15):
+// Display rules (zai-b16):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -87,7 +87,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b15',
+    build: 'zai-b16',
     head: '在線 読込中...',
     foot: '',
     center: 4,
@@ -167,20 +167,42 @@ export default {
     this.fetchData();
   },
   probeLocation() {
+    const apply = (lat, lon) => {
+      const idx = this.nearestStation(lat, lon);
+      this.setData({ foot: 'loc OK ' + STATIONS[idx][0] + ' ' + lat.toFixed(3) + ',' + lon.toFixed(3) });
+      // Centre on the nearest station, unless the user has
+      // already scrolled away from the initial view.
+      if (!this._userMoved && idx !== this.data.center) {
+        this.setData({ center: idx });
+        this.render();
+      }
+    };
     try {
+      // The real glasses expose location only via navigator.geolocation
+      // (verified on-device with the kensho probe, vrf-b2: wx.getLocation
+      // and friends do not exist; geolocation returned a real fix).
+      if (typeof navigator !== 'undefined' && navigator.geolocation &&
+          typeof navigator.geolocation.getCurrentPosition === 'function') {
+        let answered = false;
+        navigator.geolocation.getCurrentPosition(
+          (p) => {
+            answered = true;
+            if (p && p.coords) apply(p.coords.latitude, p.coords.longitude);
+          },
+          () => {
+            if (!answered) { answered = true; this.setData({ foot: 'loc NG' }); }
+          },
+          { timeout: 8000 }
+        );
+        setTimeout(() => {
+          if (!answered) { answered = true; this.setData({ foot: 'loc NG' }); }
+        }, 9000);
+        return;
+      }
       if (typeof wx !== 'undefined' && wx.getLocation) {
         wx.getLocation({
           type: 'wgs84',
-          success: (r) => {
-            const idx = this.nearestStation(r.latitude, r.longitude);
-            this.setData({ foot: 'loc OK ' + STATIONS[idx][0] + ' ' + r.latitude.toFixed(3) + ',' + r.longitude.toFixed(3) });
-            // Centre on the nearest station, unless the user has
-            // already scrolled away from the initial view.
-            if (!this._userMoved && idx !== this.data.center) {
-              this.setData({ center: idx });
-              this.render();
-            }
-          },
+          success: (r) => apply(r.latitude, r.longitude),
           fail: () => { this.setData({ foot: 'loc NG' }); }
         });
       } else {
