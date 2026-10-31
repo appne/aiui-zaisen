@@ -11,7 +11,7 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b16):
+// Display rules (zai-b17):
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
@@ -87,9 +87,10 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b16',
+    build: 'zai-b17',
     head: '在線 読込中...',
     foot: '',
+    clock: '--:--',
     center: 4,
     L0: '', L1: '', L2: '', L3: '', L4: '', L5: '', L6: '', L7: '',
     L8: '', L9: '', L10: '', L11: '', L12: '', L13: '', L14: ''
@@ -104,7 +105,8 @@ export default {
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
-  _focused: false,
+  // The agent starts in focused mode (see the Enter toggle in onKeyUp).
+  _focused: true,
   _nowMin: -1,
   _elapsedSec: 0,
   onLoad() {
@@ -143,7 +145,15 @@ export default {
       if (n > 10) n = 10;
       mark = RELOAD_MARKS[n - 1];
     }
-    this.setData({ head: mark + this._headBase });
+    this.setData({ head: mark + this._headBase, clock: this.clockText() });
+  },
+  // Current time (HH:MM) for the footer's left end, from the same
+  // anchored clock as the next-trains math.
+  clockText() {
+    const m = Math.floor(this.nowMinutes());
+    const hh = Math.floor(m / 60) % 24;
+    const mm = m % 60;
+    return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
   },
   startAutoReload() {
     this._reloadUntil = Date.now() + RELOAD_WINDOW_MS;
@@ -465,7 +475,7 @@ export default {
         + (this._delay[wdf] || 0) - nowMin;
       if (diff < -30) diff += 1440;
       else if (diff > 720) diff -= 1440;
-      if (diff < -0.5) continue;
+      if (diff < -1) continue;
       const pos = this._posByWdf[wdf];
       if (pos) {
         if (pos.dir === '1' && (pos.seg > segIdx || (pos.seg === segIdx && pos.off > 0))) continue;
@@ -486,8 +496,10 @@ export default {
       }
       if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
       const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
-      let mins = Math.floor(c.diff);
-      if (mins < 0) mins = 0;
+      // A train stays listed until 1 minute after its (delay-adjusted)
+      // departure; during that post-departure minute the remaining
+      // time is shown as '-'.
+      const mins = c.diff < 0 ? '-' : Math.floor(c.diff);
       items.push(typeAb + destAb + mins);
     }
     return items.join(':');
@@ -603,7 +615,7 @@ export default {
     <text class="line">{{ L11 }}</text>
     <text class="line">{{ L12 }}</text>
     <text class="line">{{ L13 }}</text>
-    <text class="foot">{{ foot }} {{ build }}</text>
+    <text class="foot">{{ clock }} {{ foot }} {{ build }}</text>
   </view>
 </page>
 
