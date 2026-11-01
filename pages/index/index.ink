@@ -11,7 +11,12 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b18):
+// Display rules (zai-b19):
+//   - Next-departure countdown: a train normally drops off 1 minute
+//     after its (delay-adjusted) departure time, showing '-' during
+//     that minute. But while fresh live position data says the train
+//     has not departed this station yet (still approaching it or
+//     stopped at it), it stays listed as '-' past that minute.
 //   - No blank lines: stations and trains are packed into a flat line list.
 //   - The visible window never starts on a train line: if it would, the
 //     window is shifted up to that train's station line.
@@ -88,7 +93,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b18',
+    build: 'zai-b19',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -100,6 +105,7 @@ export default {
   _tt: null,
   _ttTried: false,
   _lastFetch: 0,
+  _posAt: 0,
   _headBase: '在線 読込中...',
   _reloadUntil: 0,
   _reloadTimer: null,
@@ -337,6 +343,7 @@ export default {
             }
             this._delay = {};
             this._posByWdf = {};
+            this._posAt = Date.now();
             for (const t of this.parsedTrains()) {
               this._posByWdf[t.wdf] = t;
               let dm = parseInt(t.info.delayMinutes, 10);
@@ -476,12 +483,28 @@ export default {
         + (this._delay[wdf] || 0) - nowMin;
       if (diff < -30) diff += 1440;
       else if (diff > 720) diff -= 1440;
-      if (diff < -1) continue;
       const pos = this._posByWdf[wdf];
+      // Live position verdict for this station: has the train already
+      // departed it? Down trains depart into this station's own block
+      // sections toward Yodoyabashi (off > 0) or beyond; up trains
+      // depart into the next block toward Demachiyanagi (seg < segIdx).
+      let notDeparted = false;
       if (pos) {
-        if (pos.dir === '1' && (pos.seg > segIdx || (pos.seg === segIdx && pos.off > 0))) continue;
-        if (pos.dir === '0' && pos.seg < segIdx) continue;
+        if (pos.dir === '1') {
+          if (pos.seg > segIdx || (pos.seg === segIdx && pos.off > 0)) continue;
+          notDeparted = true;
+        } else {
+          if (pos.seg < segIdx) continue;
+          notDeparted = true;
+        }
       }
+      // Past the usual 1-minute grace, a train is kept (shown '-')
+      // only while fresh position data says it has not departed this
+      // station yet. The freshness bound (~2 reload cycles) keeps a
+      // frozen position snapshot from holding an entry forever after
+      // auto-reload ends or the feed stalls.
+      if (diff < -1 &&
+          !(notDeparted && Date.now() - this._posAt < RELOAD_MS * 2)) continue;
       cands.push({ diff: diff, wdf: wdf, entry: entry });
     }
     cands.sort((a, b) => a.diff - b.diff);
@@ -498,8 +521,9 @@ export default {
       if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
       const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
       // A train stays listed until 1 minute after its (delay-adjusted)
-      // departure; during that post-departure minute the remaining
-      // time is shown as '-'.
+      // departure — or longer while live data says it has not departed
+      // yet (see the hold rule above); whenever the remaining time is
+      // past, it is shown as '-'.
       const mins = c.diff < 0 ? '-' : Math.floor(c.diff);
       items.push(typeAb + destAb + mins);
     }
