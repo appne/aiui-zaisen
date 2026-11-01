@@ -11,7 +11,10 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b22):
+// Display rules (zai-b23):
+//   - Train position lines show the car count (live carsOfTrain)
+//     right after the type for every train, e.g. ↑準急8 出町柳行,
+//     so 4/7/8-car trains are all identifiable there.
 //   - In the next-departures display, a 4-car train (from the live
 //     feed's carsOfTrain; known only while the train is running) is
 //     marked with a '.' right after its type kanji, e.g. a 4-car
@@ -101,7 +104,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b22',
+    build: 'zai-b23',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -309,8 +312,9 @@ export default {
   trainLabel(t, all, compact) {
     const info = t.info;
     const arrow = t.dir === '0' ? '↑' : '↓';
+    // Car count goes right after the type (↑準急8 出町柳行).
     // When several trains share a line, drop the trailing 行 to save width.
-    let s = arrow + (info.trainTypeJp || '') + ' ' + (info.destStationNameJp || '') + (compact ? '' : '行');
+    let s = arrow + (info.trainTypeJp || '') + String(info.carsOfTrain || '') + ' ' + (info.destStationNameJp || '') + (compact ? '' : '行');
     if (t.delay && t.delay !== '±0' && t.delay !== '+0') s += ' ' + t.delay;
     if (t.off === 0) {
       const sName = STATIONS[t.seg][0];
