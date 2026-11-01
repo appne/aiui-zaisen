@@ -11,8 +11,10 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b17):
+// Display rules (zai-b18):
 //   - No blank lines: stations and trains are packed into a flat line list.
+//   - The visible window never starts on a train line: if it would, the
+//     window is shifted up to that train's station line.
 //   - A train stopped at a station is wrapped in [ ].
 //   - A stopped train waiting for a following train to pass it at that
 //     station is wrapped in [[ ]] (judged from the official timetable:
@@ -33,7 +35,6 @@ const STATIONS = [
   ['関目', 6], ['野江', 5], ['京橋', 4], ['天満橋', 3],
   ['北浜', 2], ['淀屋橋', 1]
 ];
-const HOME = { '清水五条': 1, '龍谷大前深草': 1 };
 // Station coordinates (WGS84), aligned with STATIONS. Source: OpenStreetMap.
 const COORDS = [
   [35.03027, 135.77268], [35.01867, 135.77224], [35.00902, 135.77233],
@@ -87,7 +88,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b17',
+    build: 'zai-b18',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -550,7 +551,6 @@ export default {
       if (this._focused && i !== this.data.center && tr.length === 0) continue;
       if (i === this.data.center) centerLine = lines.length;
       let s = (i === this.data.center ? '>' : ' ') + name;
-      if (HOME[name]) s += ' *';
       const nt = this.nextTrainsText(i);
       if (nt) s += ':' + nt;
       lines.push(s);
@@ -568,6 +568,10 @@ export default {
     let start = centerLine - 5;
     if (start < 0) start = 0;
     if (start > lines.length - 14) start = Math.max(0, lines.length - 14);
+    // If the window would start on a train line (indented with a
+    // full-width space), back up to that train's station line so the
+    // first visible line always identifies the station.
+    while (start > 0 && lines[start].charAt(0) === '　') start--;
     const patch = {};
     for (let k = 0; k < 14; k++) patch['L' + k] = lines[start + k] || '';
     this.setData(patch);
