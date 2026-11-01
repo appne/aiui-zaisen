@@ -4,6 +4,6 @@
 
 ## 注意
 
-このリポジトリは個人用プロジェクトです。コードの再利用・再配布、および Rokid AIUI ストアへの再公開を含む二次利用は許可していません。
+このリポジトリは個人用プロジェクトです。ご自身の環境で個人的に使う分には構いませんが、再配布、および Rokid AIUI ストアへの提出を含む再公開はしないでください。
 
-This is a personal project. Reuse, redistribution, or republication of this code — including submitting derived agents to the Rokid AIUI store — is not permitted.
+This is a personal project. Personal use in your own environment is fine, but please do not redistribute it or republish it — including submitting derived agents to the Rokid AIUI store.
