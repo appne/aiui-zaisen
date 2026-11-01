@@ -11,11 +11,15 @@
 // Row offset inside a station block (verified against live data 2026-10-31):
 //   offset 0 = AT that station, offset 1/2 = in the section between that
 //   station and the next station toward Yodoyabashi.
-// Display rules (zai-b20):
+// Display rules (zai-b21):
 //   - In the next-departures display, a 4-car train (from the live
 //     feed's carsOfTrain; known only while the train is running) has
-//     its destination kanji boxed with U+20DE COMBINING ENCLOSING
-//     SQUARE: short trains stop at different platform positions.
+//     its TYPE kanji boxed with U+20DE COMBINING ENCLOSING SQUARE
+//     plus a '.' separator, e.g. a 4-car sub-express to Demachiyanagi
+//     shows as [boxed 準].出5. Short trains stop at different
+//     platform positions, so they are worth spotting at a glance.
+//     (zai-b20 boxed the destination kanji instead; the user could
+//     not spot it on device and moved the mark to the type.)
 //   - Next-departure countdown: a train normally drops off 1 minute
 //     after its (delay-adjusted) departure time, showing '-' during
 //     that minute. But while fresh live position data says the train
@@ -97,7 +101,7 @@ const DEST_AB = {
 
 export default {
   data: {
-    build: 'zai-b20',
+    build: 'zai-b21',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -523,9 +527,9 @@ export default {
         typeAb = TYPE_AB[pos.info.trainTypeJp] || String(pos.info.trainTypeJp).slice(0, 1);
       }
       if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
-      let destAb = DEST_AB[dest] || String(dest).slice(0, 1);
-      // 4-car trains get the boxed destination (see display rules).
-      if (pos && String(pos.info.carsOfTrain || '') === '4') destAb += '\u20DE';
+      const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
+      // 4-car trains get the boxed type plus '.' (see display rules).
+      if (typeAb && pos && String(pos.info.carsOfTrain || '') === '4') typeAb += '\u20DE.';
       // A train stays listed until 1 minute after its (delay-adjusted)
       // departure — or longer while live data says it has not departed
       // yet (see the hold rule above); whenever the remaining time is
