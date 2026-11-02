@@ -54,6 +54,14 @@
 //     gains a "⚠種別表" suffix: the timetable in use no longer
 //     matches the table (a diagram revision, most likely) and the
 //     table needs regenerating (tools/type-table/).
+// zai-b25: the timetable cache is keyed to the service date. The
+// timetable file is a per-day operations file (weekday and holiday
+// diagrams carry different trains and number assignments), so a
+// cache is only reused while the position file's date matches the
+// date the cache was fetched for; a new service day refetches once.
+// (The old week-long cache let a holiday file drive a Monday
+// morning's countdowns on 2026-11-02: the train-number join failed
+// across the board and every countdown item lost its type.)
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -129,7 +137,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b24',
+    build: 'zai-b25',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -370,6 +378,7 @@ export default {
             // this wall-clock anchor plus the 10-second tick count.
             if (d.fileCreatedTime) {
               const fc = String(d.fileCreatedTime);
+              this._posDate = fc.slice(0, 8);
               const hh = parseInt(fc.slice(8, 10), 10);
               const mi = parseInt(fc.slice(10, 12), 10);
               const ss = parseInt(fc.slice(12, 14), 10);
@@ -411,21 +420,24 @@ export default {
       this.render();
     }
   },
-  // Timetable (for stop/pass judgement) is cached on the device: stopping
-  // patterns barely change, so it is re-fetched only when the cached copy
-  // is a week old or more. If storage or the fetch fails, display falls
-  // back to geometry-only brackets.
+  // Timetable (for stop/pass judgement) is cached on the device, keyed
+  // to the service date (zai-b25): the file is regenerated per service
+  // day and weekday/holiday diagrams differ, so the cached copy is
+  // reused only when it was fetched for the same date as the current
+  // position file. A new service day refetches once (the file is
+  // ~4MB over the phone link, so per-launch refetching is not an
+  // option). If storage or the fetch fails, display falls back to
+  // geometry-only brackets.
   fetchTimetable() {
     if (this._ttTried) return;
     this._ttTried = true;
-    const WEEK = 7 * 24 * 3600 * 1000;
     try {
       if (typeof wx !== 'undefined' && wx.getStorage) {
         wx.getStorage({
           key: 'zaisen_tt3',
           success: (r) => {
             const saved = r && r.data;
-            if (saved && saved.map && saved.at && (Date.now() - saved.at) < WEEK) {
+            if (saved && saved.map && saved.forDate && this._posDate && saved.forDate === this._posDate) {
               this._tt = saved.map;
               this.updateTypeWarn();
               this.render();
@@ -472,7 +484,7 @@ export default {
             this._typeCov = covTotal ? covHit / covTotal : 1;
             this._tt = map;
             this.updateTypeWarn();
-            this.saveTimetable(map);
+            this.saveTimetable(map, String(d.fileCreatedTime || '').slice(0, 8));
           } catch (e) {
             this._tt = null;
           }
@@ -484,7 +496,10 @@ export default {
   },
   // Save a pruned copy: main-line stations only, keeping the raw
   // departure-time strings (needed for the next-trains display).
-  saveTimetable(fullMap) {
+  // fcDate is the timetable file's own date; forDate is the position
+  // file's date at fetch time — the cache is valid only for that
+  // service date (zai-b25).
+  saveTimetable(fullMap, fcDate) {
     try {
       if (typeof wx === 'undefined' || !wx.setStorage) return;
       const names = {};
@@ -498,7 +513,7 @@ export default {
         }
         pruned[wdf] = m;
       }
-      wx.setStorage({ key: 'zaisen_tt3', data: { at: Date.now(), map: pruned } });
+      wx.setStorage({ key: 'zaisen_tt3', data: { at: Date.now(), fcDate: fcDate || '', forDate: this._posDate || '', map: pruned } });
     } catch (e) { /* cache is best-effort */ }
   },
   // (zai-b24) Day type ('weekday' | 'holiday') of a timetable file from
