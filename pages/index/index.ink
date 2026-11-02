@@ -38,6 +38,22 @@
 //     departure time = stop, "99:99" or absent = pass). Only stations with
 //     passing facilities can host an overtake (OVERTAKE below); e.g.
 //     Kiyomizu-Gojo has no refuge platform, so no [[ ]] there.
+// Display rules (zai-b24):
+//   - Departure types no longer depend on the live position join
+//     alone (startTimeList.json carries no type field, so a train
+//     that had not started running showed no type). TYPE_TABLE below
+//     is generated from Keihan's official all-trains timetable PDFs:
+//     each timetable entry is matched by its stop pattern
+//     (dir|dest|stop set over the 42 stations) and annotated with
+//     __type when the timetable is fetched. The live feed's type
+//     still wins when the train is running (it reflects same-day
+//     changes); the table covers everything else, including trains
+//     that have not departed yet.
+//   - If the table's coverage of the fetched timetable (share of
+//     main-line services it can type) drops under 85%, the header
+//     gains a "⚠種別表" suffix: the timetable in use no longer
+//     matches the table (a diagram revision, most likely) and the
+//     table needs regenerating (tools/type-table/).
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -101,10 +117,19 @@ const DEST_AB = {
   '東福寺': '東', '七条': '七', '清水五条': '清', '祇園四条': '祇',
   '神宮丸太町': '神'
 };
+// Train-type table (zai-b24), generated from Keihan's official
+// all-trains timetable PDFs (tools/type-table/build_table.py).
+// W/H map "dir|dest|stopPattern" to a type abbreviation for the
+// weekday / holiday diagrams; T disambiguates the few stop patterns
+// shared by two types (Liner vs Limited Express, whose stop sets are
+// identical) by Kitahama departure time ("H:MM", no leading zero).
+const TYPE_TABLE = {"W":{"up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","up|出町柳|SSS.......................................":"普","up|出町柳|SSSSSSSSSSSSSSSS..........................":"普","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSS................":"普","up|出町柳|SSSSSS..S...S.SS..........................":"急","up|出町柳|SSSSSS..S...S.S.S.S..SS.SS................":"急","up|樟葉|..................SSSSSSSSSSSSSSSSSSSSSSSS":"普","up|出町柳|SSSSSS..S...S.S.S.S..SS.SS.....S......SSSS":"急","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS":"普","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","up|萱島|..........................SSSSSSSSSSSSSS..":"普","up|樟葉|..................SSSSSSSSSSSSSS......SSSS":"区","up|出町柳|S.SS.S......S.S...S..S..SS.....S......SSSS":"快","up|枚方市|.....................SSSSSSSSSSSSSSSSSSS..":"普","up|出町柳|SSSSSSSSSSSSSSSSSSS.......................":"普","up|樟葉|..................SSSSSSSSSSSSSSSSSSSSSS..":"普","up|樟葉|..................SSSSSSSSS....S......SSSS":"準","up|香里園|........................SSSSSSSS......SS..":"区","up|萱島|..........................SSSSSSSSSSSSSSSS":"普","up|枚方市|.....................SSSSSS....S......SSSS":"準","up|萱島|..........................SSSSSS......SSSS":"区","up|樟葉|..................S..S..SS.....S......SSSS":"快","up|萱島|..........................SSSSSS......SS..":"区","up|枚方市|.....................SSSSSSSSSSS......SSSS":"区","up|枚方市|.....................S..SS.....S......SSSS":"快","up|枚方市|.....................SSSSSSSSSSS......SS..":"区","up|出町柳|S.SS.S................................SSSS":"快","up|淀|...............SSSSSSSSSSSSSSSSSSSSSSSSS..":"普","up|三条|..SSSSSSSSSSSSSS..........................":"普","up|三条|..SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","up|淀|...............SSSSSSSSSSSS....S......SSSS":"準","up|枚方市|.....................SSSSSS....S......SS..":"準","up|枚方市|.....................SS.SS.....S......SSSS":"急","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSS....S......SS..":"準","up|枚方市|.....................S..SS.....S......SS..":"快","up|三条|..SS.S......S.S...S..S................SSSS":"特","up|三条|..SSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","down|淀屋橋|..........................SSSSSSSSSSSSSSSS":"普","down|中之島|..........................SSSSSS......SS..":"区","down|中之島|..........................SSSSSSSSSSSSSS..":"普","down|淀屋橋|..................SSSSSSSSS....S......SSSS":"準","down|淀屋橋|..........................SSSSSS......SSSS":"区","down|淀屋橋|...............SSSSSSSSSSSS....S......SSSS":"準","down|淀屋橋|..................SSSSSSSSSSSSSS......SSSS":"区","down|淀屋橋|..................S..SS.SS.....S......SSSS":"急","down|淀屋橋|SSSSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","down|淀|SSSSSSSSSSSSSSSS..........................":"普","down|三条|SSS.......................................":"普","down|淀屋橋|.....................SSSSSS....S......SSSS":"準","down|淀屋橋|.....................S................SSSS":"特","down|淀屋橋|.....................SSSSSSSSSSSSSSSSSSSSS":"普","down|淀屋橋|..SSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","down|淀屋橋|SSSSSS..S...S.S.S.S..SS.SS.....S......SSSS":"急","down|樟葉|SSSSSSSSSSSSSSSSSSS.......................":"普","down|淀屋橋|...............SS.S..SS.SS.....S......SSSS":"急","down|淀屋橋|.....................S..SS............SSSS":"通","down|中之島|.....................SSSSSSSSSSSSSSSSSSS..":"普","down|淀屋橋|..................SSSSSSSSS...........SSSS":"通","down|淀屋橋|S.SS.S......S.S...S..S..SS............SSSS":"通","down|中之島|.....................SSSSSSSSSSS......SS..":"区","down|淀屋橋|..................SSSSSSSSSSSSSSSSSSSSSSSS":"普","down|淀屋橋|SSSSSSSSSSSSSSSSSSSSSSSSSSS...........SSSS":"通","down|淀屋橋|.....................SSSSSS...........SSSS":"通","down|淀屋橋|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS":"普","down|中之島|.....................SSSSSS...........SS..":"通","down|中之島|S.SS.S......S.S...S..S..SS............SS..":"通","down|中之島|..................SSSSSSSSS....S......SS..":"準","down|淀屋橋|.....................SSSSSSSSSSS......SSSS":"区","down|淀屋橋|..................S..S..SS.....S......SSSS":"快","down|淀屋橋|.....................S..SS.....S......SSSS":"快","down|中之島|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","down|淀屋橋|S.SS.S......S.S...S..S..SS.....S......SSSS":"快","down|淀屋橋|..................S..S................SSSS":"特","down|中之島|...............SSSSSSSSSSSSSSSSSSSSSSSSS..":"普","down|枚方市|SSSSSSSSSSSSSSSSSSSSSS....................":"普","down|中之島|SSSSSSSSSSSSSSSSSSSSSSSSSSS....S......SS..":"準","down|樟葉|..SSSSSSSSSSSSSSSSS.......................":"普","down|枚方市|SSSSSS..S...S.S.S.S..S....................":"急","down|中之島|..SSSSSSSSSSSSSSSSSSSSSSSSS....S......SS..":"準","down|中之島|..................S..S..SS.....S......SS..":"快","down|淀屋橋|S.SS.S................................SSSS":"快","down|樟葉|SSSSSS..S...S.S.S.S.......................":"急","down|中之島|..SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","down|淀|SSSSSS..S...S.SS..........................":"急","down|淀|..SSSS..S...S.SS..........................":"急","down|守口市|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..........":"普","down|寝屋川市|SSSSSSSSSSSSSSSSSSSSSSSSSS................":"普","down|寝屋川市|SSSSSS..S...S.S.S.S..SS.SS................":"急"},"H":{"up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","up|出町柳|SSS.......................................":"普","up|出町柳|SSSSSSSSSSSSSSSS..........................":"普","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSS................":"普","up|出町柳|SSSSSS..S...S.SS..........................":"急","up|出町柳|SSSSSS..S...S.S.S.S..SS.SS................":"急","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS":"普","up|出町柳|SSSSSS..S...S.S.S.S..SS.SS.....S......SSSS":"急","up|萱島|..........................SSSSSS......SSSS":"区","up|萱島|..........................SSSSSSSSSSSSSS..":"普","up|出町柳|SSSSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","up|樟葉|..................S..SS.SS.....S......SSSS":"急","up|枚方市|.....................S..SS.....S......SSSS":"快","up|萱島|..........................SSSSSS......SS..":"区","up|出町柳|S.SS.S................................SSSS":"快","up|三条|..SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS":"普","up|淀|...............SS.S..SS.SS.....S......SSSS":"急","up|三条|..SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","up|三条|..SSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","up|樟葉|..................SSSSSSSSSSSSSSSSSSSSSS..":"普","up|出町柳|SSSSSSSSSSSSSSSSSSS.......................":"普","up|樟葉|..................S..S..SS.....S......SSSS":"快","up|樟葉|..................SSSSSSSSS....S......SSSS":"準","up|樟葉|..................SSSSSSSSSSSSSS......SSSS":"区","up|出町柳|S.SS.S......S.S...S..S..SS.....S......SSSS":"快","up|枚方市|.....................SSSSSS....S......SSSS":"準","up|淀|...............SSSSSSSSSSSS....S......SSSS":"準","up|萱島|..........................SSSSSSSSSSSSSSSS":"普","up|淀|...............SSSSSSSSSSSSSSSSSSSSSSSSS..":"普","up|三条|..SS.S......S.S...S..S................SSSS":"特","up|枚方市|.....................SSSSSSSSSSSSSSSSSSS..":"普","down|淀屋橋|..........................SSSSSSSSSSSSSSSS":"普","down|中之島|..........................SSSSSS......SS..":"区","down|中之島|..........................SSSSSSSSSSSSSS..":"普","down|淀屋橋|..................SSSSSSSSS....S......SSSS":"準","down|淀屋橋|..........................SSSSSS......SSSS":"区","down|淀屋橋|...............SSSSSSSSSSSS....S......SSSS":"準","down|淀屋橋|SSSSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","down|淀屋橋|.....................SSSSSS....S......SSSS":"準","down|中之島|..................SSSSSSSSSSSSSSSSSSSSSS..":"普","down|中之島|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","down|三条|SSS.......................................":"普","down|淀屋橋|...............SS.S..SS.SS.....S......SSSS":"急","down|中之島|..SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..":"普","down|淀屋橋|SSSSSS..S...S.S.S.S..SS.SS.....S......SSSS":"急","down|淀屋橋|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS":"普","down|中之島|..................SSSSSSSSSSSSSS......SS..":"区","down|淀屋橋|..................S..S..SS.....S......SSSS":"快","down|中之島|...............SSSSSSSSSSSSSSSSSSSSSSSSS..":"普","down|中之島|..................S..S..SS.....S......SS..":"快","down|淀屋橋|S.SS.S......S.S...S..S..SS.....S......SSSS":"快","down|中之島|.....................SSSSSSSSSSSSSSSSSSS..":"普","down|淀|SSSSSSSSSSSSSSSS..........................":"普","down|中之島|.....................SSSSSSSSSSS......SS..":"区","down|淀屋橋|.....................S..SS.....S......SSSS":"快","down|淀|..SSSSSSSSSSSSSS..........................":"普","down|樟葉|..SSSSSSSSSSSSSSSSS.......................":"普","down|淀屋橋|..SSSSSSSSSSSSSSSSSSSSSSSSS....S......SSSS":"準","down|淀屋橋|S.SS.S................................SSSS":"快","down|淀|SSSSSS..S...S.SS..........................":"急","down|守口市|SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS..........":"普","down|寝屋川市|SSSSSSSSSSSSSSSSSSSSSSSSSS................":"普","down|寝屋川市|SSSSSS..S...S.S.S.S..SS.SS................":"急"},"T":{"down|淀屋橋|..................S..S..SS............SSSS":{"7:20":"ラ","7:31":"ラ","7:56":"通","8:12":"通","8:22":"ラ","8:32":"通","8:52":"ラ"},"down|淀屋橋|S.SS.S......S.S...S..S................SSSS":{"7:00":"特","7:13":"特","7:23":"特","7:37":"特","7:50":"特","8:02":"特","8:15":"特","8:28":"特","8:35":"特","8:41":"ラ","8:47":"特","8:55":"特","9:06":"特","9:15":"特","9:25":"特","9:34":"特","9:53":"特","10:11":"特","10:29":"特","10:42":"特","10:53":"特","11:05":"特","11:17":"特","11:29":"特","11:41":"特","11:53":"特","12:05":"特","12:17":"特","12:29":"特","12:41":"特","12:53":"特","13:05":"特","13:17":"特","13:29":"特","13:41":"特","13:53":"特","14:05":"特","14:17":"特","14:29":"特","14:41":"特","14:53":"特","15:05":"特","15:17":"特","15:29":"特","15:42":"特","15:54":"特","16:06":"特","16:18":"特","16:29":"特","16:41":"特","16:52":"特","17:04":"特","17:16":"特","17:29":"特","17:39":"特","17:53":"特","18:05":"特","18:17":"特","18:30":"特","18:54":"特","19:05":"ラ","19:07":"特","19:17":"特","19:29":"特","19:41":"特","19:51":"特","20:04":"特","20:14":"特","20:27":"特","20:40":"特","20:51":"特","21:03":"特","21:14":"特","21:27":"特","21:39":"特","21:51":"特","22:04":"特","22:18":"特","22:30":"特","22:43":"特","22:56":"特","23:14":"特","23:31":"特","7:01":"特","7:35":"特","7:48":"特","8:40":"特","8:51":"特","9:02":"特","9:16":"特","9:26":"特","9:39":"特","10:05":"特","10:16":"特","10:27":"特","10:40":"特","10:54":"特","13:28":"特","15:41":"特","15:53":"特","16:05":"特","16:17":"特","16:40":"特","16:51":"特","17:05":"特","17:28":"特","17:42":"特","18:04":"特","18:16":"特","18:41":"特","18:52":"特","19:06":"特","19:28":"特","19:54":"特","20:06":"特","20:17":"特","20:30":"特","20:53":"特","21:07":"特","21:21":"特","21:37":"特","21:52":"特","22:07":"特","22:23":"特","22:38":"特","22:54":"特","23:12":"特","23:30":"特","23:49":"特"},"down|淀屋橋|..SS.S......S.S...S..S................SSSS":{"6:29":"特","7:59":"ラ"},"up|出町柳|S.SS.S......S.S...S..S................SSSS":{"6:09":"特","6:39":"特","6:51":"特","7:01":"特","7:14":"特","7:22":"特","7:29":"特","7:39":"特","7:49":"特","7:58":"特","8:06":"特","8:21":"特","8:34":"特","8:48":"特","9:02":"特","9:24":"特","9:35":"特","9:46":"特","10:01":"特","10:12":"特","10:24":"特","10:37":"特","10:49":"特","11:01":"特","11:13":"特","11:25":"特","11:37":"特","11:49":"特","12:01":"特","12:13":"特","12:25":"特","12:37":"特","12:49":"特","13:01":"特","13:13":"特","13:25":"特","13:37":"特","13:49":"特","14:01":"特","14:13":"特","14:25":"特","14:37":"特","14:49":"特","15:01":"特","15:13":"特","15:25":"特","15:37":"特","15:49":"特","16:02":"特","16:13":"特","16:25":"特","16:37":"特","16:49":"特","17:02":"特","17:13":"特","17:24":"特","17:35":"特","17:37":"ラ","17:48":"特","17:59":"特","18:02":"ラ","18:15":"特","18:27":"特","18:36":"特","18:49":"特","19:01":"特","19:03":"ラ","19:14":"特","19:23":"特","19:26":"ラ","19:38":"特","19:51":"特","20:15":"特","20:27":"特","20:38":"特","21:03":"特","21:15":"特","21:27":"特","21:39":"特","21:51":"特","22:03":"特","22:16":"特","22:31":"特","22:52":"特","23:11":"特","6:16":"特","6:30":"特","6:46":"特","7:02":"特","7:13":"特","7:24":"特","7:36":"特","8:03":"特","8:14":"特","8:26":"特","8:38":"特","8:50":"特","9:03":"特","9:14":"特","9:25":"特","9:37":"特","9:49":"特","10:03":"特","10:14":"特","10:26":"特","10:38":"特","11:03":"特","16:01":"特","17:01":"特","17:14":"特","17:25":"特","17:38":"特","17:50":"特","18:01":"特","18:13":"特","18:25":"特","19:25":"特","19:37":"特","19:49":"特","20:16":"特","20:31":"特","21:02":"特","21:16":"特","21:31":"特","21:46":"特","22:01":"特"}},"meta":{"diagram":"2026-08-24","source":"keihan time01-1..4.pdf"}};
+const STATION_IDX = {};
+for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b23',
+    build: 'zai-b24',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -163,7 +188,7 @@ export default {
       if (n > 10) n = 10;
       mark = RELOAD_MARKS[n - 1];
     }
-    this.setData({ head: mark + this._headBase, clock: this.clockText() });
+    this.setData({ head: mark + this._headBase + (this._typeWarn ? ' ⚠種別表' : ''), clock: this.clockText() });
   },
   // Current time (HH:MM) for the footer's left end, from the same
   // anchored clock as the next-trains math.
@@ -397,11 +422,12 @@ export default {
     try {
       if (typeof wx !== 'undefined' && wx.getStorage) {
         wx.getStorage({
-          key: 'zaisen_tt2',
+          key: 'zaisen_tt3',
           success: (r) => {
             const saved = r && r.data;
             if (saved && saved.map && saved.at && (Date.now() - saved.at) < WEEK) {
               this._tt = saved.map;
+              this.updateTypeWarn();
               this.render();
             } else {
               this.fetchTimetableRemote();
@@ -423,6 +449,8 @@ export default {
           try {
             const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
             const map = {};
+            const dayType = this.ttDayType(d.fileCreatedTime);
+            let covTotal = 0, covHit = 0;
             for (const t of (d.TrainInfo || [])) {
               const m = {};
               const dia = t.diaStationInfoObjects || [];
@@ -430,9 +458,20 @@ export default {
                 m[s.stationNameJp] = s.stationDepTime;
               }
               if (dia.length) m['__dest'] = dia[dia.length - 1].stationNameJp;
+              const ann = this.typeKeyFor(m, dia);
+              if (ann) {
+                if (ann.nstop >= 2) covTotal++;
+                const resolved = this.resolveType(ann.key, ann.kitahama, dayType);
+                if (resolved) {
+                  m['__type'] = resolved;
+                  if (ann.nstop >= 2) covHit++;
+                }
+              }
               map[String(t.wdfBlockNo)] = m;
             }
+            this._typeCov = covTotal ? covHit / covTotal : 1;
             this._tt = map;
+            this.updateTypeWarn();
             this.saveTimetable(map);
           } catch (e) {
             this._tt = null;
@@ -455,17 +494,103 @@ export default {
         const src = fullMap[wdf];
         const m = {};
         for (const nm in src) {
-          if (names[nm] || nm === '__dest') m[nm] = src[nm];
+          if (names[nm] || nm === '__dest' || nm === '__type') m[nm] = src[nm];
         }
         pruned[wdf] = m;
       }
-      wx.setStorage({ key: 'zaisen_tt2', data: { at: Date.now(), map: pruned } });
+      wx.setStorage({ key: 'zaisen_tt3', data: { at: Date.now(), map: pruned } });
     } catch (e) { /* cache is best-effort */ }
   },
-  // Next two departures at a station, e.g. "急淀10:準出5". Computed from
+  // (zai-b24) Day type ('weekday' | 'holiday') of a timetable file from
+  // its fileCreatedTime (yyyymmdd...): Saturdays and Sundays use the
+  // holiday diagram. Day-of-week comes from a civil-date serial number
+  // anchored on 2026-11-02 (a Monday) — no Date parsing involved.
+  ttDayType(fc) {
+    const t = String(fc || '');
+    const y = parseInt(t.slice(0, 4), 10), mo = parseInt(t.slice(4, 6), 10), dd = parseInt(t.slice(6, 8), 10);
+    if (isNaN(y) || isNaN(mo) || isNaN(dd)) return 'weekday';
+    const serial = (yy, mm, d) => {
+      const y2 = mm <= 2 ? yy - 1 : yy;
+      const era = Math.floor(y2 / 400);
+      const yoe = y2 - era * 400;
+      const mp = (mm + 9) % 12;
+      const doy = Math.floor((153 * mp + 2) / 5) + d - 1;
+      return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+    };
+    let dow = (serial(y, mo, dd) - serial(2026, 11, 2)) % 7;
+    if (dow < 0) dow += 7;
+    return dow >= 5 ? 'holiday' : 'weekday';
+  },
+  // (zai-b24) The TYPE_TABLE lookup key for one timetable entry:
+  // "dir|dest|stopPattern" over the 42 main-line stations (stop set
+  // only; '-' counts as a stop — it marks the run's boundary station).
+  // Depot-terminating entries (dest = Neyagawa signal yard) are keyed
+  // by their last passenger stop, as in the official PDF. Also returns
+  // the Kitahama departure time (normalized to "H:MM") used by the T
+  // disambiguation table, and the main-line stop count.
+  typeKeyFor(m, dia) {
+    let pat = '', nstop = 0, first = -1, last = -1, lastStop = '';
+    for (let i = 0; i < STATIONS.length; i++) {
+      const v = m[STATIONS[i][0]];
+      if (v && v !== '99:99') { pat += 'S'; nstop++; } else pat += '.';
+    }
+    for (const s of dia) {
+      const ix = STATION_IDX[s.stationNameJp];
+      if (ix === undefined) continue;
+      if (first < 0) first = ix;
+      last = ix;
+      if (s.stationDepTime && s.stationDepTime !== '99:99') lastStop = s.stationNameJp;
+    }
+    if (first < 0) return null;
+    let dest = m['__dest'] || lastStop;
+    if (dest === '寝屋川信号場') dest = lastStop;
+    const dir = last < first ? 'up' : 'down';
+    let kitahama = m['北浜'] || '';
+    if (kitahama.indexOf(':') > 0) {
+      const p = kitahama.split(':');
+      kitahama = String(parseInt(p[0], 10)) + ':' + p[1];
+    } else kitahama = '';
+    return { key: dir + '|' + dest + '|' + pat, nstop, kitahama };
+  },
+  // (zai-b24) Resolve a type abbreviation: the file's own day-type
+  // table first, then the Kitahama-time table for shared patterns,
+  // then the other day type's table (covers national-holiday
+  // weekdays, which are served by the holiday diagram).
+  resolveType(key, kitahama, dayType) {
+    if (!TYPE_TABLE) return '';
+    const own = dayType === 'holiday' ? TYPE_TABLE.H : TYPE_TABLE.W;
+    const other = dayType === 'holiday' ? TYPE_TABLE.W : TYPE_TABLE.H;
+    if (own[key]) return own[key];
+    const t = TYPE_TABLE.T[key];
+    if (t && kitahama && t[kitahama]) return t[kitahama];
+    return other[key] || '';
+  },
+  // (zai-b24) Keep the header's type-table warning in sync with the
+  // coverage measured when the timetable was fetched (or recomputed
+  // from the cached __type fields). Under 85% coverage the table no
+  // longer matches the timetable in use — time to regenerate it.
+  updateTypeWarn() {
+    if (typeof this._typeCov !== 'number') {
+      if (!this._tt) return;
+      let total = 0, hit = 0;
+      for (const wdf in this._tt) {
+        const e = this._tt[wdf];
+        let nstop = 0;
+        for (let i = 0; i < STATIONS.length; i++) {
+          const v = e[STATIONS[i][0]];
+          if (v && v !== '99:99') nstop++;
+        }
+        if (nstop >= 2) { total++; if (e.__type) hit++; }
+      }
+      this._typeCov = total ? hit / total : 1;
+    }
+    this._typeWarn = this._typeCov < 0.85;
+  },
+  // Next departures at a station, e.g. "急淀10:準出5". Computed from
   // the timetable (scheduled departure + the train's current delay).
-  // Type abbreviations come from the live position feed, so a train that
-  // has not started running yet shows its destination and minutes only.
+  // Type abbreviations come from the live position feed when the
+  // train is running, else from the official-timetable type table
+  // (zai-b24, the entry's __type).
   // Origin stations have no departure time in the data ("-"), so termini
   // starting there show nothing.
   // Current time-of-day in minutes (float) for the next-trains math:
@@ -530,6 +655,7 @@ export default {
       if (pos && pos.info.trainTypeJp) {
         typeAb = TYPE_AB[pos.info.trainTypeJp] || String(pos.info.trainTypeJp).slice(0, 1);
       }
+      if (!typeAb && c.entry.__type) typeAb = c.entry.__type;
       if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
       const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
       // 4-car trains get a '.' after the type (see display rules).
