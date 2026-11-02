@@ -115,8 +115,9 @@ const RELOAD_MS = 90 * 1000;
 const RELOAD_WINDOW_MS = 10 * 60 * 1000;
 const RELOAD_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 // Abbreviations for the next-trains display on each station line,
-// e.g. "清水五条 *:急淀10:準出5" (express for Yodoyabashi in 10 min,
-// semi-express for Demachiyanagi in 5 min).
+// grouped by direction (zai-b27), e.g. "清水五条↑準出1:準出3↓急淀3:準中8"
+// (toward Demachiyanagi: semi-expresses in 1 and 3 min; the other way:
+// an express for Yodoyabashi in 3 min, a semi-express in 8 min).
 const TYPE_AB = {
   '普通': '普', '準急': '準', '急行': '急', '特急': '特',
   '快速急行': '快', '区間急行': '区', '通勤準急': '通',
@@ -144,7 +145,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b26',
+    build: 'zai-b27',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -646,7 +647,9 @@ export default {
     }
     this._typeWarn = this._typeCov < 0.85;
   },
-  // Next departures at a station, e.g. "急淀10:準出5". Computed from
+  // Next departures at a station, grouped by direction (zai-b27):
+  // "↑準出1:準出3↓急淀3:準中8" — up to 2 toward Demachiyanagi under
+  // '↑', then up to 2 the other way under '↓'. Computed from
   // the timetable (scheduled departure + the train's current delay).
   // Type abbreviations come from the live position feed when the
   // train is running, else from the official-timetable type table
@@ -705,8 +708,15 @@ export default {
       cands.push({ diff: diff, wdf: wdf, entry: entry });
     }
     cands.sort((a, b) => a.diff - b.diff);
-    const items = [];
-    for (let k = 0; k < Math.min(4, cands.length); k++) {
+    // Grouped display (zai-b27, user request): departures toward
+    // Demachiyanagi first under '↑', all other departures under '↓',
+    // at most 2 per group, e.g. "↑準出1:準出3↓急淀3:準中8". A train's
+    // group is set by which side of this station its destination is on
+    // (live direction as fallback for destinations outside STATIONS).
+    const upItems = [];
+    const downItems = [];
+    for (let k = 0; k < cands.length; k++) {
+      if (upItems.length >= 2 && downItems.length >= 2) break;
       const c = cands[k];
       let dest = '';
       const pos = this._posByWdf[c.wdf];
@@ -717,6 +727,13 @@ export default {
       }
       if (!typeAb && c.entry.__type) typeAb = c.entry.__type;
       if (!dest) dest = c.entry['__dest'] || this.lastDestOf(c.entry);
+      const destIdx = STATION_IDX[dest];
+      let up;
+      if (destIdx !== undefined) up = destIdx < segIdx;
+      else if (pos) up = pos.dir === '0';
+      else up = false;
+      const bucket = up ? upItems : downItems;
+      if (bucket.length >= 2) continue;
       const destAb = DEST_AB[dest] || String(dest).slice(0, 1);
       // 4-car trains get a '.' after the type (see display rules).
       if (typeAb && pos && String(pos.info.carsOfTrain || '') === '4') typeAb += '.';
@@ -725,9 +742,12 @@ export default {
       // yet (see the hold rule above); whenever the remaining time is
       // past, it is shown as '-'.
       const mins = c.diff < 0 ? '-' : Math.floor(c.diff);
-      items.push(typeAb + destAb + mins);
+      bucket.push(typeAb + destAb + mins);
     }
-    return items.join(':');
+    let out = '';
+    if (upItems.length) out += '↑' + upItems.join(':');
+    if (downItems.length) out += '↓' + downItems.join(':');
+    return out;
   },
   lastDestOf(entry) {
     // dia entries are in travel order per train; the destination is the
@@ -776,7 +796,7 @@ export default {
       if (i === this.data.center) centerLine = lines.length;
       let s = (i === this.data.center ? '>' : ' ') + name;
       const nt = this.nextTrainsText(i);
-      if (nt) s += ':' + nt;
+      if (nt) s += nt;
       lines.push(s);
       // Combine the block's trains onto lines of up to 3 trains each;
       // any remaining trains continue on the next line.
