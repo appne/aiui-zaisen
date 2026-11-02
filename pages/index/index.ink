@@ -62,6 +62,13 @@
 // (The old week-long cache let a holiday file drive a Monday
 // morning's countdowns on 2026-11-02: the train-number join failed
 // across the board and every countdown item lost its type.)
+// zai-b26: the "date" in that key is the SERVICE date with a 03:00
+// boundary (see serviceDateStr): the last trains run past midnight
+// (the timetable file spans 05:01-24:30, written as 24:xx), so
+// between 00:00 and 03:00 the files still carry the previous
+// service day even though their timestamps show the new calendar
+// date. The same service date also drives the type table's
+// weekday/holiday choice.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -137,7 +144,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b25',
+    build: 'zai-b26',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -378,7 +385,7 @@ export default {
             // this wall-clock anchor plus the 10-second tick count.
             if (d.fileCreatedTime) {
               const fc = String(d.fileCreatedTime);
-              this._posDate = fc.slice(0, 8);
+              this._posDate = this.serviceDateStr(fc);
               const hh = parseInt(fc.slice(8, 10), 10);
               const mi = parseInt(fc.slice(10, 12), 10);
               const ss = parseInt(fc.slice(12, 14), 10);
@@ -484,7 +491,7 @@ export default {
             this._typeCov = covTotal ? covHit / covTotal : 1;
             this._tt = map;
             this.updateTypeWarn();
-            this.saveTimetable(map, String(d.fileCreatedTime || '').slice(0, 8));
+            this.saveTimetable(map, this.serviceDateStr(d.fileCreatedTime));
           } catch (e) {
             this._tt = null;
           }
@@ -516,12 +523,50 @@ export default {
       wx.setStorage({ key: 'zaisen_tt3', data: { at: Date.now(), fcDate: fcDate || '', forDate: this._posDate || '', map: pruned } });
     } catch (e) { /* cache is best-effort */ }
   },
+  // (zai-b26) Service date (yyyymmdd) of a fileCreatedTime, with the
+  // day boundary at 03:00 instead of midnight. Keihan's files describe
+  // an operational day — the timetable spans 05:01-24:30, with
+  // past-midnight times written as 24:xx — and in the small hours the
+  // served files still carry the previous service day even though
+  // their creation timestamp already shows the new calendar date.
+  // Keying the timetable cache by calendar date would poison it when
+  // the agent is opened between 00:00 and the content flip; with a
+  // 03:00 boundary, 00:00-02:59 counts as the previous service day.
+  serviceDateStr(fc) {
+    const t = String(fc || '');
+    const y = parseInt(t.slice(0, 4), 10), mo = parseInt(t.slice(4, 6), 10), dd = parseInt(t.slice(6, 8), 10);
+    const hh = parseInt(t.slice(8, 10), 10);
+    if (isNaN(y) || isNaN(mo) || isNaN(dd) || isNaN(hh) || hh >= 3) return t.slice(0, 8);
+    const serial = (yy, mm, d) => {
+      const y2 = mm <= 2 ? yy - 1 : yy;
+      const era = Math.floor(y2 / 400);
+      const yoe = y2 - era * 400;
+      const mp = (mm + 9) % 12;
+      const doy = Math.floor((153 * mp + 2) / 5) + d - 1;
+      return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+    };
+    const s = serial(y, mo, dd) - 1;
+    const era = Math.floor(s / 146097);
+    const doe = s - era * 146097;
+    const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+    const y2 = yoe + era * 400;
+    const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+    const mp = Math.floor((5 * doy + 2) / 153);
+    const d2 = doy - Math.floor((153 * mp + 2) / 5) + 1;
+    const m2 = mp < 10 ? mp + 3 : mp - 9;
+    const y3 = m2 <= 2 ? y2 + 1 : y2;
+    const p2 = (n) => String(n).padStart(2, '0');
+    return '' + y3 + p2(m2) + p2(d2);
+  },
   // (zai-b24) Day type ('weekday' | 'holiday') of a timetable file from
   // its fileCreatedTime (yyyymmdd...): Saturdays and Sundays use the
-  // holiday diagram. Day-of-week comes from a civil-date serial number
-  // anchored on 2026-11-02 (a Monday) — no Date parsing involved.
+  // holiday diagram. (zai-b26) Judged on the SERVICE date (03:00
+  // boundary, see serviceDateStr), so a file fetched in the small
+  // hours is typed by the operational day it actually carries.
+  // Day-of-week comes from a civil-date serial number anchored on
+  // 2026-11-02 (a Monday) — no Date parsing involved.
   ttDayType(fc) {
-    const t = String(fc || '');
+    const t = this.serviceDateStr(fc);
     const y = parseInt(t.slice(0, 4), 10), mo = parseInt(t.slice(4, 6), 10), dd = parseInt(t.slice(6, 8), 10);
     if (isNaN(y) || isNaN(mo) || isNaN(dd)) return 'weekday';
     const serial = (yy, mm, d) => {
