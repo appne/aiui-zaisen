@@ -92,6 +92,11 @@
 // in the centred station's own section toward Yodoyabashi gets no
 // extra station line). 'single' is the startup default, and the
 // Enter cycle is single -> focus -> omit -> all -> single.
+// zai-b32: walking-safety trim: in 'single' mode the approaching
+// trains' station lines show the station name only (no next-train
+// countdowns; those stay on the centred station's line), and the
+// header font shrinks below the station lines (24px -> 17px, all
+// modes) so the header reads as metadata, not content.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -168,7 +173,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b31',
+    build: 'zai-b32',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -806,10 +811,15 @@ export default {
     if (t.dir === '1') return t.seg < f || (t.seg === f && t.off === 0);
     return t.seg > f || t.seg === f;
   },
-  stationLine(i) {
+  // A station's display line. With bare set, the next-trains
+  // countdown text is omitted (used by 'single' mode for the
+  // approaching trains' stations, zai-b32).
+  stationLine(i, bare) {
     let s = (i === this.data.center ? '>' : ' ') + STATIONS[i][0];
-    const nt = this.nextTrainsText(i);
-    if (nt) s += nt;
+    if (!bare) {
+      const nt = this.nextTrainsText(i);
+      if (nt) s += nt;
+    }
     return s;
   },
   // Window the packed line list around the centred station's line
@@ -849,7 +859,7 @@ export default {
     }
     const lines = [];
     if (downT) {
-      lines.push(this.stationLine(downT.seg));
+      lines.push(this.stationLine(downT.seg, true));
       lines.push('　' + this.trainLabel(downT, all, false));
     }
     const centerLine = lines.length;
@@ -860,7 +870,7 @@ export default {
       lines.push('　' + chunk.map(t => this.trainLabel(t, all, multi)).join(' '));
     }
     if (upT) {
-      if (upT.seg !== f) lines.push(this.stationLine(upT.seg));
+      if (upT.seg !== f) lines.push(this.stationLine(upT.seg, true));
       lines.push('　' + this.trainLabel(upT, all, false));
     }
     this.applyLines(lines, centerLine);
@@ -966,8 +976,8 @@ export default {
 
 .head {
   color: #40FF5E;
-  font-size: 24px;
-  line-height: 27px;
+  font-size: 17px;
+  line-height: 19px;
   margin-bottom: 3px;
 }
 
