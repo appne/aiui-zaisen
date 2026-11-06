@@ -85,6 +85,13 @@
 // kanji (注 = focus, 全 = all, 省 = omit), before the type-table
 // warning: with many trains running, 'all' and 'omit' render almost
 // identically, so the mode needs to be visible at a glance.
+// zai-b31: fourth display mode 'single' (単): only the centred
+// station, any trains stopped there, and the single nearest train
+// per direction that stops at the centred station (each shown with
+// the station line of the block it is running in; a train already
+// in the centred station's own section toward Yodoyabashi gets no
+// extra station line). 'single' is the startup default, and the
+// Enter cycle is single -> focus -> omit -> all -> single.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -161,7 +168,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b30',
+    build: 'zai-b31',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -180,10 +187,12 @@ export default {
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
-  // Display mode: 'focus' (trains stopping at the centred station
-  // only), 'all', or 'omit' (unfiltered, empty stations hidden).
-  // The agent starts in focus mode; Enter cycles (see onKeyUp).
-  _mode: 'focus',
+  // Display mode: 'single' (centred station + nearest stopping
+  // train per direction), 'focus' (trains stopping at the centred
+  // station only), 'omit' (unfiltered, empty stations hidden), or
+  // 'all'. The agent starts in single mode; Enter cycles
+  // single -> focus -> omit -> all -> single (see onKeyUp).
+  _mode: 'single',
   _lastOkHm: '',
   _nowMin: -1,
   _elapsedSec: 0,
@@ -223,7 +232,7 @@ export default {
       if (n > 10) n = 10;
       mark = RELOAD_MARKS[n - 1];
     }
-    const modeMark = this._mode === 'all' ? ' 全' : this._mode === 'omit' ? ' 省' : ' 注';
+    const modeMark = this._mode === 'focus' ? ' 注' : this._mode === 'omit' ? ' 省' : this._mode === 'all' ? ' 全' : ' 単';
     this.setData({ head: mark + this._headBase + modeMark + (this._typeWarn ? ' ⚠種別表' : ''), clock: this.clockText() });
   },
   // Current time (HH:MM) for the footer's left end, from the same
@@ -797,8 +806,68 @@ export default {
     if (t.dir === '1') return t.seg < f || (t.seg === f && t.off === 0);
     return t.seg > f || t.seg === f;
   },
+  stationLine(i) {
+    let s = (i === this.data.center ? '>' : ' ') + STATIONS[i][0];
+    const nt = this.nextTrainsText(i);
+    if (nt) s += nt;
+    return s;
+  },
+  // Window the packed line list around the centred station's line
+  // and push it into the L0..L13 display fields.
+  applyLines(lines, centerLine) {
+    let start = centerLine - 5;
+    if (start < 0) start = 0;
+    if (start > lines.length - 14) start = Math.max(0, lines.length - 14);
+    // If the window would start on a train line (indented with a
+    // full-width space), back up to that train's station line so the
+    // first visible line always identifies the station.
+    while (start > 0 && lines[start].charAt(0) === '　') start--;
+    const patch = {};
+    for (let k = 0; k < 14; k++) patch['L' + k] = lines[start + k] || '';
+    this.setData(patch);
+  },
+  // (zai-b31) 'single' mode: the centred station, any trains stopped
+  // there, and the nearest train per direction that stops at the
+  // centred station and is still approaching it. An approaching
+  // train is shown under the station line of the block it runs in,
+  // except an up train already inside the centred station's own
+  // section (toward Yodoyabashi), which follows the centred
+  // station's lines directly.
+  renderSingle(all) {
+    const f = this.data.center;
+    const focusName = STATIONS[f][0];
+    let downT = null, upT = null;
+    const atStation = [];
+    for (const t of all) {
+      if (this.stopsAt(t.wdf, focusName) === false) continue;
+      if (t.seg === f && t.off === 0) { atStation.push(t); continue; }
+      if (t.dir === '1') {
+        if (t.seg < f && (!downT || t.row > downT.row)) downT = t;
+      } else {
+        if ((t.seg > f || (t.seg === f && t.off > 0)) && (!upT || t.row < upT.row)) upT = t;
+      }
+    }
+    const lines = [];
+    if (downT) {
+      lines.push(this.stationLine(downT.seg));
+      lines.push('　' + this.trainLabel(downT, all, false));
+    }
+    const centerLine = lines.length;
+    lines.push(this.stationLine(f));
+    for (let s2 = 0; s2 < atStation.length; s2 += 3) {
+      const chunk = atStation.slice(s2, s2 + 3);
+      const multi = chunk.length > 1;
+      lines.push('　' + chunk.map(t => this.trainLabel(t, all, multi)).join(' '));
+    }
+    if (upT) {
+      if (upT.seg !== f) lines.push(this.stationLine(upT.seg));
+      lines.push('　' + this.trainLabel(upT, all, false));
+    }
+    this.applyLines(lines, centerLine);
+  },
   render() {
     const all = this.parsedTrains();
+    if (this._mode === 'single') { this.renderSingle(all); return; }
     const focusName = STATIONS[this.data.center][0];
     const bySeg = {};
     for (const t of all) {
@@ -821,10 +890,7 @@ export default {
       // are hidden too (the centred station itself always stays).
       if (this._mode !== 'all' && i !== this.data.center && tr.length === 0) continue;
       if (i === this.data.center) centerLine = lines.length;
-      let s = (i === this.data.center ? '>' : ' ') + name;
-      const nt = this.nextTrainsText(i);
-      if (nt) s += nt;
-      lines.push(s);
+      lines.push(this.stationLine(i));
       // Combine the block's trains onto lines of up to 3 trains each;
       // any remaining trains continue on the next line.
       for (let s2 = 0; s2 < tr.length; s2 += 3) {
@@ -836,16 +902,7 @@ export default {
         lines.push('　' + line);
       }
     }
-    let start = centerLine - 5;
-    if (start < 0) start = 0;
-    if (start > lines.length - 14) start = Math.max(0, lines.length - 14);
-    // If the window would start on a train line (indented with a
-    // full-width space), back up to that train's station line so the
-    // first visible line always identifies the station.
-    while (start > 0 && lines[start].charAt(0) === '　') start--;
-    const patch = {};
-    for (let k = 0; k < 14; k++) patch['L' + k] = lines[start + k] || '';
-    this.setData(patch);
+    this.applyLines(lines, centerLine);
   },
   move(d) {
     this._userMoved = true;
@@ -862,11 +919,11 @@ export default {
       event.preventDefault();
       // Click behaviour: while auto-reload is active, a click reloads,
       // resets the auto-reload window AND cycles the display mode
-      // (focus -> all -> omit -> focus). While auto-reload is
-      // inactive, a click reloads and starts auto-reload, leaving
+      // (single -> focus -> omit -> all -> single). While auto-reload
+      // is inactive, a click reloads and starts auto-reload, leaving
       // the mode unchanged.
       if (this.autoActive()) {
-        this._mode = this._mode === 'focus' ? 'all' : this._mode === 'all' ? 'omit' : 'focus';
+        this._mode = this._mode === 'single' ? 'focus' : this._mode === 'focus' ? 'omit' : this._mode === 'omit' ? 'all' : 'single';
       }
       this.startAutoReload();
       this.fetchData();
