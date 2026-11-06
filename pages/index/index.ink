@@ -81,6 +81,10 @@
 //     always stays, as in focused mode). The Enter cycle (while
 //     auto-reload is active) is now focus -> all -> omit -> focus;
 //     the agent still starts in focus mode.
+// zai-b30: the header tail shows the current display mode as one
+// kanji (注 = focus, 全 = all, 省 = omit), before the type-table
+// warning: with many trains running, 'all' and 'omit' render almost
+// identically, so the mode needs to be visible at a glance.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -157,7 +161,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b29',
+    build: 'zai-b30',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -219,7 +223,8 @@ export default {
       if (n > 10) n = 10;
       mark = RELOAD_MARKS[n - 1];
     }
-    this.setData({ head: mark + this._headBase + (this._typeWarn ? ' ⚠種別表' : ''), clock: this.clockText() });
+    const modeMark = this._mode === 'all' ? ' 全' : this._mode === 'omit' ? ' 省' : ' 注';
+    this.setData({ head: mark + this._headBase + modeMark + (this._typeWarn ? ' ⚠種別表' : ''), clock: this.clockText() });
   },
   // Current time (HH:MM) for the footer's left end, from the same
   // anchored clock as the next-trains math.
