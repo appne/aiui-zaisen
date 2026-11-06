@@ -69,6 +69,18 @@
 // service day even though their timestamps show the new calendar
 // date. The same service date also drives the type table's
 // weekday/holiday choice.
+// zai-b29:
+//   - Position-load failures no longer guess "メンテナンス中かも":
+//     every failure kind (maintenance HTML, request failure,
+//     exception) shows "読込失敗 最終H:MM" with the last successful
+//     position file's creation time (hour without leading zero);
+//     before the first successful load of the session it is just
+//     "読込失敗".
+//   - Third display mode: trains stay unfiltered, but stations
+//     whose block holds no train are omitted (the centred station
+//     always stays, as in focused mode). The Enter cycle (while
+//     auto-reload is active) is now focus -> all -> omit -> focus;
+//     the agent still starts in focus mode.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -145,7 +157,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b28',
+    build: 'zai-b29',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -164,8 +176,11 @@ export default {
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
-  // The agent starts in focused mode (see the Enter toggle in onKeyUp).
-  _focused: true,
+  // Display mode: 'focus' (trains stopping at the centred station
+  // only), 'all', or 'omit' (unfiltered, empty stations hidden).
+  // The agent starts in focus mode; Enter cycles (see onKeyUp).
+  _mode: 'focus',
+  _lastOkHm: '',
   _nowMin: -1,
   _elapsedSec: 0,
   onLoad() {
@@ -365,6 +380,11 @@ export default {
     }
     return s;
   },
+  // (zai-b29) Unified position-load failure header: "読込失敗" plus
+  // the last successful load time when this session has one.
+  failHead() {
+    this._headBase = '読込失敗' + (this._lastOkHm ? ' 最終' + this._lastOkHm : '');
+  },
   fetchData() {
     const now = Date.now();
     if (now - this._lastFetch < 2000) return;
@@ -407,23 +427,25 @@ export default {
             const t = String(d.fileCreatedTime || '');
             const hh = t.slice(8, 10), mm = t.slice(10, 12);
             this._headBase = '京阪 在線 ' + hh + ':' + mm + '現在';
+            const hNum = parseInt(hh, 10);
+            if (!isNaN(hNum) && mm) this._lastOkHm = hNum + ':' + mm;
           } catch (e) {
             // Keihan shows a maintenance page (HTML) during maintenance,
             // which lands here as a JSON parse failure.
-            this._headBase = '在線 メンテナンス中かも';
+            this.failHead();
           }
           this.applyHead();
           this.render();
           this.fetchTimetable();
         },
         fail: () => {
-          this._headBase = '在線 取得失敗';
+          this.failHead();
           this.applyHead();
           this.render();
         }
       });
     } catch (e) {
-      this._headBase = '在線 取得不可';
+      this.failHead();
       this.applyHead();
       this.render();
     }
@@ -775,7 +797,7 @@ export default {
     const focusName = STATIONS[this.data.center][0];
     const bySeg = {};
     for (const t of all) {
-      if (this._focused) {
+      if (this._mode === 'focus') {
         // Hide trains that do not stop at the focused station (the
         // timetable also excludes trains that never reach it), and
         // trains that have already passed it.
@@ -790,9 +812,9 @@ export default {
     for (let i = 0; i < STATIONS.length; i++) {
       const name = STATIONS[i][0];
       const tr = bySeg[i] || [];
-      // In focused mode, stations with no relevant train are hidden too
-      // (the focused station itself always stays).
-      if (this._focused && i !== this.data.center && tr.length === 0) continue;
+      // In focus and omit modes, stations with no (relevant) train
+      // are hidden too (the centred station itself always stays).
+      if (this._mode !== 'all' && i !== this.data.center && tr.length === 0) continue;
       if (i === this.data.center) centerLine = lines.length;
       let s = (i === this.data.center ? '>' : ' ') + name;
       const nt = this.nextTrainsText(i);
@@ -834,10 +856,13 @@ export default {
     else if (event.code === 'Enter') {
       event.preventDefault();
       // Click behaviour: while auto-reload is active, a click reloads,
-      // resets the auto-reload window AND toggles the focused display
-      // mode. While auto-reload is inactive, a click reloads and starts
-      // auto-reload, leaving the mode unchanged.
-      if (this.autoActive()) this._focused = !this._focused;
+      // resets the auto-reload window AND cycles the display mode
+      // (focus -> all -> omit -> focus). While auto-reload is
+      // inactive, a click reloads and starts auto-reload, leaving
+      // the mode unchanged.
+      if (this.autoActive()) {
+        this._mode = this._mode === 'focus' ? 'all' : this._mode === 'all' ? 'omit' : 'focus';
+      }
       this.startAutoReload();
       this.fetchData();
       this.render();
