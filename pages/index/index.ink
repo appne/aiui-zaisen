@@ -97,6 +97,15 @@
 // countdowns; those stay on the centred station's line), and the
 // header font shrinks below the station lines (24px -> 17px, all
 // modes) so the header reads as metadata, not content.
+// zai-b33: two fixes. (A) Nakanoshima-line trains are placed by
+// the position feed on the Kitahama / Yodoyabashi block rows
+// (121+) while approaching Temmabashi on the branch; their
+// timetables carry no Kitahama, so the stop filter dropped them
+// and 'single' showed nothing at Kitahama. They are now
+// attributed to Temmabashi's block (see parsedTrains). (B) The
+// timetable fetch now retries (at most once a minute) while it
+// is still missing, instead of leaving the whole session
+// unfiltered after one failed attempt.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -173,7 +182,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b32',
+    build: 'zai-b33',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -183,7 +192,7 @@ export default {
   },
   _trains: [],
   _tt: null,
-  _ttTried: false,
+  _ttLastTry: 0,
   _lastFetch: 0,
   _posAt: 0,
   _headBase: '在線 読込中...',
@@ -328,25 +337,51 @@ export default {
   },
   parseTrain(o) {
     const row = parseInt(o.locationRow, 10);
-    if (isNaN(row) || row < 1 || row > 124) return null;
-    const n = 42 - Math.floor((row - 1) / 3);
-    if (n < 1 || n > 42) return null;
+    // Rows 1..124 are the main line (Yodoyabashi is row 124). Rows
+    // past 124 exist only on the Nakanoshima branch, whose grid
+    // overlaps the Kitahama / Yodoyabashi blocks; parsedTrains
+    // decides what to do with them (zai-b33).
+    if (isNaN(row) || row < 1 || row > 140) return null;
     const info = (o.trainInfoObjects && o.trainInfoObjects[0]) || {};
     return {
       row: row,
       off: (row - 1) % 3,
-      seg: 42 - n,
+      seg: Math.floor((row - 1) / 3),
       dir: o.trainDirection === '0' ? '0' : '1',
       wdf: String(info.wdfBlockNo || ''),
       info: info,
       delay: o.delay || ''
     };
   },
+  // True when the train runs via the Nakanoshima line: its
+  // timetable entry names a branch station and never Kitahama.
+  isNakanoshima(wdf) {
+    if (!this._tt) return false;
+    const e = this._tt[wdf];
+    if (!e) return false;
+    if (e['北浜'] !== undefined) return false;
+    return e['中之島'] !== undefined || e['渡辺橋'] !== undefined ||
+           e['なにわ橋'] !== undefined || e['大江橋'] !== undefined;
+  },
   parsedTrains() {
     const out = [];
     for (const o of this._trains) {
       const t = this.parseTrain(o);
-      if (t) out.push(t);
+      if (!t) continue;
+      if (t.row >= 121) {
+        // (zai-b33) In the Kitahama (121-123) / Yodoyabashi (124)
+        // block rows — and beyond them, up the branch — a
+        // Nakanoshima-line train is really on the branch, before
+        // or just past Temmabashi. Attribute it to Temmabashi's
+        // block (in the section on the Yodoyabashi side) so it is
+        // neither shown at, nor stop-filtered by, Kitahama /
+        // Yodoyabashi, whose names its timetable does not carry.
+        // Its row is kept for nearest-train ordering. Anything
+        // else in rows past the terminus is dropped, as before.
+        if (!this.isNakanoshima(t.wdf)) { if (t.row > 124) continue; }
+        else { t.seg = 39; t.off = 2; }
+      }
+      out.push(t);
     }
     out.sort((a, b) => a.row - b.row);
     return out;
@@ -478,8 +513,16 @@ export default {
   // option). If storage or the fetch fails, display falls back to
   // geometry-only brackets.
   fetchTimetable() {
-    if (this._ttTried) return;
-    this._ttTried = true;
+    // (zai-b33) Retry while the timetable is still missing: the
+    // first attempt runs right after the first position fetch,
+    // and later position fetches retry at most once a minute
+    // until it lands. (Before b33, a failed first attempt —
+    // cache miss plus a failed ~4MB fetch over the phone link —
+    // left the whole session without stop/pass filtering.)
+    if (this._tt) return;
+    const now = Date.now();
+    if (this._ttLastTry && now - this._ttLastTry < 60000) return;
+    this._ttLastTry = now;
     try {
       if (typeof wx !== 'undefined' && wx.getStorage) {
         wx.getStorage({
