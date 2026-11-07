@@ -106,6 +106,14 @@
 // timetable fetch now retries (at most once a minute) while it
 // is still missing, instead of leaving the whole session
 // unfiltered after one failed attempt.
+// zai-b34: in 'single' mode, an up train already inside the
+// centred station's own section (it has left the next station
+// toward Yodoyabashi and is approaching) now gets that next
+// station's name line above it. Up to b33 the station line was
+// omitted in this case, so the moment the train entered the
+// last section the "station below" vanished from the display
+// and which station showed the gap moved with the trains
+// (user report 2026-11-07: Fujimori / Chushojima / Shichijo).
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -182,7 +190,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b33',
+    build: 'zai-b34',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -882,10 +890,12 @@ export default {
   // (zai-b31) 'single' mode: the centred station, any trains stopped
   // there, and the nearest train per direction that stops at the
   // centred station and is still approaching it. An approaching
-  // train is shown under the station line of the block it runs in,
-  // except an up train already inside the centred station's own
-  // section (toward Yodoyabashi), which follows the centred
-  // station's lines directly.
+  // train is shown under the station line of the block it runs in.
+  // An up train already inside the centred station's own section
+  // (toward Yodoyabashi) is shown under the NEXT station's line:
+  // it has just left that station, and omitting the line made the
+  // "station below" disappear exactly as the train got close
+  // (zai-b34).
   renderSingle(all) {
     const f = this.data.center;
     const focusName = STATIONS[f][0];
@@ -914,6 +924,7 @@ export default {
     }
     if (upT) {
       if (upT.seg !== f) lines.push(this.stationLine(upT.seg, true));
+      else if (f + 1 < STATIONS.length) lines.push(this.stationLine(f + 1, true));
       lines.push('　' + this.trainLabel(upT, all, false));
     }
     this.applyLines(lines, centerLine);
