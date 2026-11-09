@@ -113,6 +113,12 @@
 // scheduled 30 seconds later (RETRY_MS) instead of waiting for
 // the next 90-second tick; the retry chains while loads keep
 // failing and is cancelled by the next success.
+// zai-b36: a stopped train is also shown as an overtake wait
+// ([[...]]) when another train in the same direction has an
+// earlier countdown at that station (isCountdownOvertake) — e.g.
+// a semi-express held at Sanjo while an express behind it is due
+// to leave Sanjo sooner. Covers overtakers that stop at the
+// station, which the passing-train check cannot see.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -191,7 +197,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b35',
+    build: 'zai-b36',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -457,6 +463,72 @@ export default {
     }
     return false;
   },
+  // (zai-b36) User rule: a stopped train is also an overtake wait
+  // when another train in the SAME direction has an earlier
+  // countdown at this station — e.g. a semi-express held at Sanjo
+  // while an express behind it is due to leave Sanjo sooner.
+  // Timetable-based (the same delay-adjusted departure diffs as
+  // nextTrainsText), so it also covers overtakers that stop here,
+  // which isOvertakeWait (passing trains only) cannot see.
+  // Skipped at the train's origin terminus, where an earlier
+  // departure is just another service leaving first.
+  isCountdownOvertake(a) {
+    if (!this._tt) return false;
+    if (a.dir === '1' && a.seg === 0) return false;
+    if (a.dir === '0' && a.seg === STATIONS.length - 1) return false;
+    const sName = STATIONS[a.seg][0];
+    const nowMin = this.nowMinutes();
+    // Delay-adjusted minutes until wdf's departure from this
+    // station, or null when it does not depart here (passes,
+    // originates, terminates, or no timetable entry).
+    const diffOf = (wdf) => {
+      const e = this._tt[wdf];
+      if (!e) return null;
+      const dep = e[sName];
+      if (!dep || dep === '99:99' || dep === '-') return null;
+      const destName = e['__dest'] || this.lastDestOf(e);
+      if (destName === sName) return null;
+      const parts = dep.split(':');
+      if (parts.length !== 2) return null;
+      let diff = (parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10))
+        + (this._delay[wdf] || 0) - nowMin;
+      if (diff < -30) diff += 1440;
+      else if (diff > 720) diff -= 1440;
+      return diff;
+    };
+    const diffA = diffOf(a.wdf);
+    if (diffA === null || diffA < -1 || diffA > 90) return false;
+    for (const wdf in this._tt) {
+      if (wdf === a.wdf) continue;
+      const e = this._tt[wdf];
+      const pos = this._posByWdf[wdf];
+      let dirB;
+      if (pos) dirB = pos.dir;
+      else {
+        const destName = e['__dest'] || this.lastDestOf(e);
+        const destIdx = STATION_IDX[destName];
+        if (destIdx === undefined || destIdx === a.seg) continue;
+        dirB = destIdx > a.seg ? '1' : '0';
+      }
+      if (dirB !== a.dir) continue;
+      // A train live data says has already left this station is
+      // ahead of A, not an overtaker still to come.
+      if (pos) {
+        if (a.dir === '1') {
+          if (pos.seg > a.seg || (pos.seg === a.seg && pos.off > 0)) continue;
+        } else {
+          if (pos.seg < a.seg) continue;
+        }
+      }
+      const diffB = diffOf(wdf);
+      if (diffB === null) continue;
+      // Long past its departure with no live "not departed" word,
+      // the train is treated as gone (same rule as nextTrainsText).
+      if (diffB < -1 && !(pos && Date.now() - this._posAt < RELOAD_MS * 2)) continue;
+      if (diffB < diffA) return true;
+    }
+    return false;
+  },
   trainLabel(t, all, compact) {
     const info = t.info;
     const arrow = t.dir === '0' ? '↑' : '↓';
@@ -467,7 +539,7 @@ export default {
     if (t.off === 0) {
       const sName = STATIONS[t.seg][0];
       if (this.stopsAt(t.wdf, sName) === false) return s; // passing through
-      if (this.isOvertakeWait(t, all)) return '[[' + s + ']]';
+      if (this.isOvertakeWait(t, all) || this.isCountdownOvertake(t)) return '[[' + s + ']]';
       return '[' + s + ']';
     }
     return s;
