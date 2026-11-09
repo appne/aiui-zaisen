@@ -106,6 +106,13 @@
 // timetable fetch now retries (at most once a minute) while it
 // is still missing, instead of leaving the whole session
 // unfiltered after one failed attempt.
+// zai-b35: reload pacing, at the user's request. (A) A reload is
+// skipped when the previous reload started less than 10 seconds
+// ago (RELOAD_GUARD_MS; fetchData used to carry a 2-second guard).
+// (B) After a position-load failure, one extra reload is
+// scheduled 30 seconds later (RETRY_MS) instead of waiting for
+// the next 90-second tick; the retry chains while loads keep
+// failing and is cancelled by the next success.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -149,6 +156,8 @@ const URL_TT = 'https://www.keihan.co.jp/zaisen-up/startTimeList.json';
 // regenerated roughly once a minute (measured gaps of 60-71 s, not
 // published), so 90 s stays clear of hammering it while missing little.
 const RELOAD_MS = 90 * 1000;
+const RETRY_MS = 30 * 1000;
+const RELOAD_GUARD_MS = 10 * 1000;
 const RELOAD_WINDOW_MS = 10 * 60 * 1000;
 const RELOAD_MARKS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 // Abbreviations for the next-trains display on each station line,
@@ -182,7 +191,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b33',
+    build: 'zai-b35',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -198,6 +207,7 @@ export default {
   _headBase: '在線 読込中...',
   _reloadUntil: 0,
   _reloadTimer: null,
+  _retryTimer: null,
   _clockTimer: null,
   _delay: {},
   _posByWdf: {},
@@ -269,6 +279,34 @@ export default {
       clearInterval(this._reloadTimer);
     }
     this._reloadTimer = null;
+    this.clearRetry();
+  },
+  // (zai-b35) Failure retry: one extra reload RETRY_MS after a
+  // failed load. The retry chains while loads keep failing (each
+  // failure schedules the next one) and is cancelled by the next
+  // success or when the auto-reload window ends. A failure
+  // replaces a still-pending retry rather than dropping its own:
+  // otherwise a retry that comes due in the same instant as a
+  // regular tick would be swallowed by the reload guard and the
+  // chain would silently break back to the 90-second cadence.
+  scheduleRetry() {
+    if (!this.autoActive()) return;
+    if (typeof setTimeout === 'undefined') return;
+    this.clearRetry();
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      if (this.autoActive()) this.fetchData();
+    }, RETRY_MS);
+  },
+  clearRetry() {
+    if (this._retryTimer != null && typeof clearTimeout !== 'undefined') {
+      clearTimeout(this._retryTimer);
+    }
+    this._retryTimer = null;
+  },
+  noteFetchFailure() {
+    this.failHead();
+    this.scheduleRetry();
   },
   onReloadTick() {
     if (!this.autoActive()) {
@@ -441,7 +479,7 @@ export default {
   },
   fetchData() {
     const now = Date.now();
-    if (now - this._lastFetch < 2000) return;
+    if (now - this._lastFetch < RELOAD_GUARD_MS) return;
     this._lastFetch = now;
     this._headBase = '在線 読込中...';
     this.applyHead();
@@ -450,6 +488,7 @@ export default {
         url: URL_POS,
         method: 'GET',
         success: (res) => {
+          this.clearRetry();
           try {
             const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
             this._trains = d.locationObjects || [];
@@ -486,20 +525,20 @@ export default {
           } catch (e) {
             // Keihan shows a maintenance page (HTML) during maintenance,
             // which lands here as a JSON parse failure.
-            this.failHead();
+            this.noteFetchFailure();
           }
           this.applyHead();
           this.render();
           this.fetchTimetable();
         },
         fail: () => {
-          this.failHead();
+          this.noteFetchFailure();
           this.applyHead();
           this.render();
         }
       });
     } catch (e) {
-      this.failHead();
+      this.noteFetchFailure();
       this.applyHead();
       this.render();
     }
