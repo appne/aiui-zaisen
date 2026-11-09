@@ -119,6 +119,16 @@
 // a semi-express held at Sanjo while an express behind it is due
 // to leave Sanjo sooner. Covers overtakers that stop at the
 // station, which the passing-train check cannot see.
+// zai-b37: the service-date boundary moves from 03:00 to 05:00.
+// A week of overnight probing (2026-11-02..11-10) found Keihan's
+// served files actually flip to the new service day at
+// 04:20-04:35, about 1.5 hours after the old boundary, so between
+// 03:00 and the flip the cache key and day type were judged on
+// the new calendar day while the files still carried the previous
+// service day. 05:00 sits after every observed flip and just
+// before the first departure (05:01), so the only misjudged
+// window left is the few minutes between the flip and 05:00,
+// when nothing is running yet.
 const STATIONS = [
   ['出町柳', 42], ['神宮丸太町', 41], ['三条', 40], ['祇園四条', 39],
   ['清水五条', 38], ['七条', 37], ['東福寺', 36], ['鳥羽街道', 35],
@@ -197,7 +207,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b36',
+    build: 'zai-b37',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -720,19 +730,21 @@ export default {
     } catch (e) { /* cache is best-effort */ }
   },
   // (zai-b26) Service date (yyyymmdd) of a fileCreatedTime, with the
-  // day boundary at 03:00 instead of midnight. Keihan's files describe
+  // day boundary at 05:00 instead of midnight (03:00 until zai-b36;
+  // moved to 05:00 in zai-b37 after overnight probing showed the
+  // served files flip at 04:20-04:35). Keihan's files describe
   // an operational day — the timetable spans 05:01-24:30, with
   // past-midnight times written as 24:xx — and in the small hours the
   // served files still carry the previous service day even though
   // their creation timestamp already shows the new calendar date.
   // Keying the timetable cache by calendar date would poison it when
   // the agent is opened between 00:00 and the content flip; with a
-  // 03:00 boundary, 00:00-02:59 counts as the previous service day.
+  // 05:00 boundary, 00:00-04:59 counts as the previous service day.
   serviceDateStr(fc) {
     const t = String(fc || '');
     const y = parseInt(t.slice(0, 4), 10), mo = parseInt(t.slice(4, 6), 10), dd = parseInt(t.slice(6, 8), 10);
     const hh = parseInt(t.slice(8, 10), 10);
-    if (isNaN(y) || isNaN(mo) || isNaN(dd) || isNaN(hh) || hh >= 3) return t.slice(0, 8);
+    if (isNaN(y) || isNaN(mo) || isNaN(dd) || isNaN(hh) || hh >= 5) return t.slice(0, 8);
     const serial = (yy, mm, d) => {
       const y2 = mm <= 2 ? yy - 1 : yy;
       const era = Math.floor(y2 / 400);
@@ -756,9 +768,10 @@ export default {
   },
   // (zai-b24) Day type ('weekday' | 'holiday') of a timetable file from
   // its fileCreatedTime (yyyymmdd...): Saturdays and Sundays use the
-  // holiday diagram. (zai-b26) Judged on the SERVICE date (03:00
-  // boundary, see serviceDateStr), so a file fetched in the small
-  // hours is typed by the operational day it actually carries.
+  // holiday diagram. (zai-b26) Judged on the SERVICE date (see
+  // serviceDateStr; boundary 05:00 since zai-b37), so a file fetched
+  // in the small hours is typed by the operational day it actually
+  // carries.
   // Day-of-week comes from a civil-date serial number anchored on
   // 2026-11-02 (a Monday) — no Date parsing involved.
   ttDayType(fc) {
