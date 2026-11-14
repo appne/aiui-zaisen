@@ -119,6 +119,11 @@
 // a semi-express held at Sanjo while an express behind it is due
 // to leave Sanjo sooner. Covers overtakers that stop at the
 // station, which the passing-train check cannot see.
+// zai-b39: tap must refresh the header too. b38's Enter branch
+// called render() only, but the mode tail (単/注/省/全) lives in
+// the header, which only applyHead() rebuilds — so after a tap
+// the header kept showing the previous mode. Enter now calls
+// applyHead() before render(), like the 10 s clock tick does.
 // zai-b38: tap/back split, at the user's request (2026-11-14,
 // once the radar work proved BACK reaches the page and can be
 // consumed). Until b37 a tap (Enter) did everything at once:
@@ -217,7 +222,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b38',
+    build: 'zai-b39',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -1126,6 +1131,7 @@ export default {
       // focus -> omit -> all -> single. No reload and no
       // auto-reload window reset; both moved to BACK.
       this._mode = this._mode === 'single' ? 'focus' : this._mode === 'focus' ? 'omit' : this._mode === 'omit' ? 'all' : 'single';
+      this.applyHead();
       this.render();
     }
   }
