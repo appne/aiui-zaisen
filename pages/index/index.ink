@@ -119,6 +119,16 @@
 // a semi-express held at Sanjo while an express behind it is due
 // to leave Sanjo sooner. Covers overtakers that stop at the
 // station, which the passing-train check cannot see.
+// zai-b38: tap/back split, at the user's request (2026-11-14,
+// once the radar work proved BACK reaches the page and can be
+// consumed). Until b37 a tap (Enter) did everything at once:
+// while auto-reload was active it reloaded, reset the window
+// AND cycled the display mode; while inactive it reloaded
+// only. Now: Enter cycles the display mode ONLY (no reload,
+// no window reset), and BACK is the reload key — refetch +
+// restart the auto-reload window, mode untouched. A second
+// BACK within 3 s is left unconsumed so the OS exit sequence
+// still works (the radar rdr-b9 pattern).
 // zai-b37: the service-date boundary moves from 03:00 to 05:00.
 // A week of overnight probing (2026-11-02..11-10) found Keihan's
 // served files actually flip to the new service day at
@@ -207,7 +217,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b37',
+    build: 'zai-b38',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -223,6 +233,7 @@ export default {
   _headBase: '在線 読込中...',
   _reloadUntil: 0,
   _reloadTimer: null,
+  _lastBackAt: 0,
   _retryTimer: null,
   _clockTimer: null,
   _delay: {},
@@ -1090,20 +1101,31 @@ export default {
     this.render();
   },
   onKeyUp(event) {
-    if (event.code === 'ArrowUp') { event.preventDefault(); this.move(-1); }
-    else if (event.code === 'ArrowDown') { event.preventDefault(); this.move(1); }
-    else if (event.code === 'Enter') {
+    const code = event && event.code;
+    const kc = event && (typeof event.keyCode === 'number' ? event.keyCode
+      : (typeof event.which === 'number' ? event.which : -1));
+    // BACK (zai-b38, the radar rdr-b9 pattern): the reload key.
+    // Refetch and restart the auto-reload window; the display
+    // mode is NOT touched. A second press within 3 s is left
+    // unconsumed, so the OS exit sequence can proceed.
+    if (code === 'Backspace' || code === 'Escape' || code === 'BrowserBack'
+        || code === 'Back' || code === 'GoBack' || kc === 4 || kc === 27) {
+      if (Date.now() - this._lastBackAt < 3000) return;
       event.preventDefault();
-      // Click behaviour: while auto-reload is active, a click reloads,
-      // resets the auto-reload window AND cycles the display mode
-      // (single -> focus -> omit -> all -> single). While auto-reload
-      // is inactive, a click reloads and starts auto-reload, leaving
-      // the mode unchanged.
-      if (this.autoActive()) {
-        this._mode = this._mode === 'single' ? 'focus' : this._mode === 'focus' ? 'omit' : this._mode === 'omit' ? 'all' : 'single';
-      }
+      this._lastBackAt = Date.now();
       this.startAutoReload();
       this.fetchData();
+      this.render();
+      return;
+    }
+    if (code === 'ArrowUp') { event.preventDefault(); this.move(-1); }
+    else if (code === 'ArrowDown') { event.preventDefault(); this.move(1); }
+    else if (code === 'Enter') {
+      event.preventDefault();
+      // Tap (zai-b38): display-mode cycling ONLY — single ->
+      // focus -> omit -> all -> single. No reload and no
+      // auto-reload window reset; both moved to BACK.
+      this._mode = this._mode === 'single' ? 'focus' : this._mode === 'focus' ? 'omit' : this._mode === 'omit' ? 'all' : 'single';
       this.render();
     }
   }
