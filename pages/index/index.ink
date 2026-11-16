@@ -222,7 +222,7 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b39',
+    build: 'zai-b40',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
@@ -239,6 +239,7 @@ export default {
   _reloadUntil: 0,
   _reloadTimer: null,
   _lastBackAt: 0,
+  _lastInteractAt: 0,
   _retryTimer: null,
   _clockTimer: null,
   _delay: {},
@@ -1113,9 +1114,13 @@ export default {
     // Refetch and restart the auto-reload window; the display
     // mode is NOT touched. A second press within 3 s is left
     // unconsumed, so the OS exit sequence can proceed.
+    // zai-b40 (radar rdr-b12 pattern, user request 2026-11-16):
+    // a press within 3 s of the last tap/swipe also passes
+    // through, so swipe/tap then BACK exits at once.
     if (code === 'Backspace' || code === 'Escape' || code === 'BrowserBack'
         || code === 'Back' || code === 'GoBack' || kc === 4 || kc === 27) {
-      if (Date.now() - this._lastBackAt < 3000) return;
+      if (Date.now() - this._lastBackAt < 3000
+          || Date.now() - this._lastInteractAt < 3000) return;
       event.preventDefault();
       this._lastBackAt = Date.now();
       this.startAutoReload();
@@ -1123,10 +1128,11 @@ export default {
       this.render();
       return;
     }
-    if (code === 'ArrowUp') { event.preventDefault(); this.move(-1); }
-    else if (code === 'ArrowDown') { event.preventDefault(); this.move(1); }
+    if (code === 'ArrowUp') { event.preventDefault(); this._lastInteractAt = Date.now(); this.move(-1); }
+    else if (code === 'ArrowDown') { event.preventDefault(); this._lastInteractAt = Date.now(); this.move(1); }
     else if (code === 'Enter') {
       event.preventDefault();
+      this._lastInteractAt = Date.now();
       // Tap (zai-b38): display-mode cycling ONLY — single ->
       // focus -> omit -> all -> single. No reload and no
       // auto-reload window reset; both moved to BACK.
