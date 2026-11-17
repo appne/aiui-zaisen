@@ -222,14 +222,18 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b41',
+    build: 'zai-b42',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
     footLine: '',
     center: 4,
     L0: '', L1: '', L2: '', L3: '', L4: '', L5: '', L6: '', L7: '',
-    L8: '', L9: '', L10: '', L11: '', L12: '', L13: '', L14: ''
+    L8: '', L9: '', L10: '', L11: '', L12: '', L13: '', L14: '',
+    L0c: 'line', L1c: 'line', L2c: 'line', L3c: 'line',
+    L4c: 'line', L5c: 'line', L6c: 'line', L7c: 'line',
+    L8c: 'line', L9c: 'line', L10c: 'line', L11c: 'line',
+    L12c: 'line', L13c: 'line'
   },
   _trains: [],
   _tt: null,
@@ -1019,24 +1023,15 @@ export default {
     while (start > 0 && lines[start].charAt(0) === '　') start--;
     const patch = {};
     for (let k = 0; k < 14; k++) patch['L' + k] = lines[start + k] || '';
-    // (zai-b41) The footer rides in the line flow. A text slot
-    // that has once held content keeps its line height even after
-    // being cleared to '' (kensho vrf-b32), so with the footer in
-    // its own element below L0..L13, returning to a short display
-    // (e.g. 'single') left the cleared slots' heights above the
-    // footer and it sank. Instead, when the window has a spare
-    // slot, the footer text goes into the first slot after the
-    // real lines and the foot element stays ''. Only a full
-    // window (14 real lines) uses the foot element, where no
-    // cleared slot sits above it.
-    const realCount = Math.min(14, lines.length - start);
-    const footText = this.data.clock + ' ' + this.data.foot + ' ' + this.data.build;
-    if (realCount < 14) {
-      patch['L' + realCount] = footText;
-      patch.footLine = '';
-    } else {
-      patch.footLine = footText;
-    }
+    // (zai-b42) The footer lives in its own .foot element
+    // (15px, dim) at all times again. The zai-b41 in-flow
+    // workaround is retired: '' slots now collapse through
+    // the bound 'gone' class (kensho vrf-b35 proved a bound
+    // class zeroing line-height/font-size/height collapses
+    // a ''-retained slot), so cleared slots no longer hold
+    // the footer down on short displays.
+    for (let k = 0; k < 14; k++) patch['L' + k + 'c'] = patch['L' + k] ? 'line' : 'line gone';
+    patch.footLine = this.data.clock + ' ' + this.data.foot + ' ' + this.data.build;
     this.setData(patch);
   },
   // (zai-b31) 'single' mode: the centred station, any trains stopped
@@ -1166,20 +1161,20 @@ export default {
 <page>
   <view class="container">
     <text class="head">{{ head }}</text>
-    <text class="line">{{ L0 }}</text>
-    <text class="line">{{ L1 }}</text>
-    <text class="line">{{ L2 }}</text>
-    <text class="line">{{ L3 }}</text>
-    <text class="line">{{ L4 }}</text>
-    <text class="line">{{ L5 }}</text>
-    <text class="line">{{ L6 }}</text>
-    <text class="line">{{ L7 }}</text>
-    <text class="line">{{ L8 }}</text>
-    <text class="line">{{ L9 }}</text>
-    <text class="line">{{ L10 }}</text>
-    <text class="line">{{ L11 }}</text>
-    <text class="line">{{ L12 }}</text>
-    <text class="line">{{ L13 }}</text>
+    <text class="{{ L0c }}">{{ L0 }}</text>
+    <text class="{{ L1c }}">{{ L1 }}</text>
+    <text class="{{ L2c }}">{{ L2 }}</text>
+    <text class="{{ L3c }}">{{ L3 }}</text>
+    <text class="{{ L4c }}">{{ L4 }}</text>
+    <text class="{{ L5c }}">{{ L5 }}</text>
+    <text class="{{ L6c }}">{{ L6 }}</text>
+    <text class="{{ L7c }}">{{ L7 }}</text>
+    <text class="{{ L8c }}">{{ L8 }}</text>
+    <text class="{{ L9c }}">{{ L9 }}</text>
+    <text class="{{ L10c }}">{{ L10 }}</text>
+    <text class="{{ L11c }}">{{ L11 }}</text>
+    <text class="{{ L12c }}">{{ L12 }}</text>
+    <text class="{{ L13c }}">{{ L13 }}</text>
     <text class="foot">{{ footLine }}</text>
   </view>
 </page>
@@ -1212,5 +1207,12 @@ export default {
   font-size: 15px;
   line-height: 17px;
   margin-top: 3px;
+}
+
+.gone {
+  line-height: 0px;
+  font-size: 0px;
+  height: 0px;
+  margin-top: 0px;
 }
 </style>
