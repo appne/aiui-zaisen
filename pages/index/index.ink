@@ -222,10 +222,11 @@ for (let si = 0; si < STATIONS.length; si++) STATION_IDX[STATIONS[si][0]] = si;
 
 export default {
   data: {
-    build: 'zai-b40',
+    build: 'zai-b41',
     head: '在線 読込中...',
     foot: '',
     clock: '--:--',
+    footLine: '',
     center: 4,
     L0: '', L1: '', L2: '', L3: '', L4: '', L5: '', L6: '', L7: '',
     L8: '', L9: '', L10: '', L11: '', L12: '', L13: '', L14: ''
@@ -1018,6 +1019,24 @@ export default {
     while (start > 0 && lines[start].charAt(0) === '　') start--;
     const patch = {};
     for (let k = 0; k < 14; k++) patch['L' + k] = lines[start + k] || '';
+    // (zai-b41) The footer rides in the line flow. A text slot
+    // that has once held content keeps its line height even after
+    // being cleared to '' (kensho vrf-b32), so with the footer in
+    // its own element below L0..L13, returning to a short display
+    // (e.g. 'single') left the cleared slots' heights above the
+    // footer and it sank. Instead, when the window has a spare
+    // slot, the footer text goes into the first slot after the
+    // real lines and the foot element stays ''. Only a full
+    // window (14 real lines) uses the foot element, where no
+    // cleared slot sits above it.
+    const realCount = Math.min(14, lines.length - start);
+    const footText = this.data.clock + ' ' + this.data.foot + ' ' + this.data.build;
+    if (realCount < 14) {
+      patch['L' + realCount] = footText;
+      patch.footLine = '';
+    } else {
+      patch.footLine = footText;
+    }
     this.setData(patch);
   },
   // (zai-b31) 'single' mode: the centred station, any trains stopped
@@ -1161,7 +1180,7 @@ export default {
     <text class="line">{{ L11 }}</text>
     <text class="line">{{ L12 }}</text>
     <text class="line">{{ L13 }}</text>
-    <text class="foot">{{ clock }} {{ foot }} {{ build }}</text>
+    <text class="foot">{{ footLine }}</text>
   </view>
 </page>
 
